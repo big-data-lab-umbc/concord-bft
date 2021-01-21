@@ -52,6 +52,8 @@ class BlsThresholdAccumulator : public BlsAccumulatorBase {
     sigToBytes(reinterpret_cast<unsigned char*>(outThreshSig), threshSigLen);
   }
 
+  virtual IThresholdAccumulator* clone() { return new BlsThresholdAccumulator(*this); }
+
   virtual bool hasShareVerificationEnabled() const { return shareVerificationEnabled; }
 
   // Used internally, by benchmarks and by subclasses

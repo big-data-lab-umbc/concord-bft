@@ -21,15 +21,7 @@
 
 namespace concordUtils {
 
-class SpanContext {
- public:
-  SpanContext() = default;
-  explicit SpanContext(const std::string& data) : data_{data} {}
-  const std::string& data() const { return data_; }
-
- private:
-  std::string data_;
-};
+using SpanContext = std::string;
 
 class SpanWrapper {
  public:

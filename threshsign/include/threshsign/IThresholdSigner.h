@@ -16,9 +16,8 @@
 #include "ISecretKey.h"
 #include "IPublicKey.h"
 
-class IThresholdSigner {
+class IThresholdSigner : public virtual concord::serialize::Serializable {
  public:
-  virtual ~IThresholdSigner() = default;
   virtual int requiredLengthForSignedData() const = 0;
   virtual void signData(const char *hash, int hashLen, char *outSig, int outSigLen) = 0;
 

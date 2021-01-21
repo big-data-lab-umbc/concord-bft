@@ -22,7 +22,6 @@ from util.skvbc_history_tracker import verify_linearizability
 from math import inf
 
 from util.bft import KEY_FILE_PREFIX, with_trio, with_bft_network
-from util import eliot_logging as log
 
 
 def start_replica_cmd(builddir, replica_id):
@@ -157,7 +156,7 @@ class SkvbcPersistenceTest(unittest.TestCase):
         await bft_network.wait_for_state_transfer_to_stop(up_to_date_node,
                                                           stale_node)
 
-        await bft_network.force_quorum_including_replica(stale_node)
+        bft_network.force_quorum_including_replica(stale_node)
 
         # Retrieve the value we put first to ensure state transfer worked
         # when the log went away
@@ -206,7 +205,7 @@ class SkvbcPersistenceTest(unittest.TestCase):
         bft_network.start_replica(stale_node)
         await bft_network.wait_for_state_transfer_to_stop(0, stale_node)
 
-        await bft_network.force_quorum_including_replica(stale_node)
+        bft_network.force_quorum_including_replica(stale_node)
 
         # Retrieve the value we put first to ensure state transfer worked
         # when the log went away
@@ -224,7 +223,7 @@ class SkvbcPersistenceTest(unittest.TestCase):
                                                              stale_node,
                                                              nb_crashes=20):
        for _ in range(nb_crashes):
-           log.log_message(message_type=f'Restarting replica {stale_node}')
+           print(f'Restarting replica {stale_node}')
            bft_network.start_replica(stale_node)
            try:
                await bft_network.wait_for_fetching_state(stale_node)
@@ -241,11 +240,9 @@ class SkvbcPersistenceTest(unittest.TestCase):
                    self.fail("State transfer did not complete, " +
                              "but we are not fetching either!")
            finally:
-               log.log_message(message_type=f'Stopping replica {stale_node}')
+               print(f'Stopping replica {stale_node}')
                bft_network.stop_replica(stale_node)
 
-    from os import environ
-    @unittest.skipIf(environ.get('BUILD_COMM_TCP_TLS', "").lower() == "true", "Unstable on CI (TCP/TLS only)")
     @with_trio
     @with_bft_network(start_replica_cmd,
                       selected_configs=lambda n, f, c: f >= 2)
@@ -283,7 +280,7 @@ class SkvbcPersistenceTest(unittest.TestCase):
             unstable_replicas=unstable_replicas
         )
 
-        await bft_network.force_quorum_including_replica(stale_node)
+        bft_network.force_quorum_including_replica(stale_node)
 
         # Retrieve the value we put first to ensure state transfer worked
         # when the log went away
@@ -307,10 +304,10 @@ class SkvbcPersistenceTest(unittest.TestCase):
         )
 
         if source_replica_id in unstable_replicas:
-            log.log_message(message_type=f'Stopping source replica {source_replica_id}')
+            print(f'Stopping source replica {source_replica_id}')
             bft_network.stop_replica(source_replica_id)
 
-            log.log_message(message_type=f'Re-starting stale replica {stale} to start state transfer')
+            print(f'Re-starting stale replica {stale} to start state transfer')
             bft_network.start_replica(stale)
 
             await bft_network.wait_for_state_transfer_to_stop(
@@ -318,22 +315,20 @@ class SkvbcPersistenceTest(unittest.TestCase):
                 stale_node=stale
             )
 
-            log.log_message(message_type=f'State transfer completed, despite initial source '
+            print(f'State transfer completed, despite initial source '
                   f'replica {source_replica_id} being down')
 
             bft_network.start_replica(source_replica_id)
         else:
-            log.log_message(message_type="No source replica set in stale node, checking "
+            print("No source replica set in stale node, checking "
                   "if state transfer has already completed...")
             await bft_network.wait_for_state_transfer_to_stop(
                 up_to_date_node=primary,
                 stale_node=stale
             )
-            log.log_message(message_type="State transfer completed before we had a chance "
+            print("State transfer completed before we had a chance "
                   "to stop the source replica.")
 
-    from os import environ
-    @unittest.skipIf(environ.get('BUILD_COMM_TCP_TLS', "").lower() == "true", "Unstable on CI (TCP/TLS only)")
     @with_trio
     @with_bft_network(start_replica_cmd,
                       selected_configs=lambda n, f, c: f >= 2)
@@ -406,7 +401,7 @@ class SkvbcPersistenceTest(unittest.TestCase):
             err_msg="Make sure we are in the initial view."
         )
 
-        log.log_message(message_type=f'Initial view number is {view}, as expected.')
+        print(f'Initial view number is {view}, as expected.')
 
         if crash_repeatedly:
             await self._run_state_transfer_while_crashing_primary_repeatedly(
@@ -426,7 +421,7 @@ class SkvbcPersistenceTest(unittest.TestCase):
                 trigger_view_change=trigger_view_change
             )
 
-        await bft_network.force_quorum_including_replica(stale_replica)
+        bft_network.force_quorum_including_replica(stale_replica)
 
         kvpairs = await tracker.read_and_track_known_kv(known_key, client)
         self.assertDictEqual(dict(known_kv), kvpairs)
@@ -434,10 +429,10 @@ class SkvbcPersistenceTest(unittest.TestCase):
     async def _run_state_transfer_while_crashing_primary_once(
             self, skvbc, bft_network, n, primary, stale, trigger_view_change=False):
 
-        log.log_message(message_type=f'Stopping primary replica {primary} to trigger view change')
+        print(f'Stopping primary replica {primary} to trigger view change')
         bft_network.stop_replica(primary)
 
-        log.log_message(message_type=f'Re-starting stale replica {stale} to start state transfer')
+        print(f'Re-starting stale replica {stale} to start state transfer')
         bft_network.start_replica(stale)
 
         if trigger_view_change:
@@ -466,7 +461,7 @@ class SkvbcPersistenceTest(unittest.TestCase):
                 err_msg="Make sure view change has NOT been triggered during state transfer."
             )
 
-        log.log_message(message_type=f'State transfer completed, despite the primary '
+        print(f'State transfer completed, despite the primary '
               f'replica crashing.')
 
         bft_network.start_replica(primary)
@@ -478,12 +473,12 @@ class SkvbcPersistenceTest(unittest.TestCase):
         stable_replicas = bft_network.all_replicas(without={primary, stale})
 
         for _ in range(2):
-            log.log_message(message_type=f'Stopping current primary replica {current_primary} '
+            print(f'Stopping current primary replica {current_primary} '
                   f'to trigger view change')
             bft_network.stop_replica(current_primary)
             await self._trigger_view_change(skvbc)
 
-            log.log_message(message_type=f'Repeatedly restarting stale replica {stale} '
+            print(f'Repeatedly restarting stale replica {stale} '
                   f'to with view change running in the background.')
 
             await self._fetch_or_finish_state_transfer_while_crashing(
@@ -515,11 +510,11 @@ class SkvbcPersistenceTest(unittest.TestCase):
             err_msg="Make sure view change has been triggered during state transfer."
         )
 
-        log.log_message(message_type=f'State transfer completed, despite the primary '
+        print(f'State transfer completed, despite the primary '
               f'replica crashing repeatedly in the process.')
 
     async def _trigger_view_change(self, skvbc):
-        log.log_message(message_type="Sending random transactions to trigger view change...")
+        print("Sending random transactions to trigger view change...")
         with trio.move_on_after(1):  # seconds
             async with trio.open_nursery() as nursery:
                 nursery.start_soon(skvbc.send_indefinite_write_requests)
@@ -529,7 +524,7 @@ class SkvbcPersistenceTest(unittest.TestCase):
 
         source_replica_id = inf
 
-        log.log_message(message_type=f'Restarting stale replica until '
+        print(f'Restarting stale replica until '
               f'it fetches from {unstable_replicas}...')
         with trio.move_on_after(10):  # seconds
             while True:
@@ -543,8 +538,8 @@ class SkvbcPersistenceTest(unittest.TestCase):
                     break
 
         if source_replica_id < inf:
-            log.log_message(message_type=f'Stale replica now fetching from {source_replica_id}')
+            print(f'Stale replica now fetching from {source_replica_id}')
         else:
-            log.log_message(message_type=f'Stale replica is not fetching right now.')
+            print(f'Stale replica is not fetching right now.')
 
         return source_replica_id

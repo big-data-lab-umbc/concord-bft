@@ -44,29 +44,31 @@ target_link_libraries(sparse_merkle_storage_serialization_unit_test PUBLIC
     kvbc
 )
 
-if(rapidcheck_FOUND)
+if(RAPIDCHECK_FOUND)
 add_executable(sparse_merkle_storage_db_adapter_property_test
     sparse_merkle_storage/db_adapter_property_test.cpp )
 add_test(sparse_merkle_storage_db_adapter_property_test sparse_merkle_storage_db_adapter_property_test)
 # Decrease both the input size and test count from the default value of 100 to 50 in order to speed up this test.
 set_property(TEST sparse_merkle_storage_db_adapter_property_test PROPERTY ENVIRONMENT RC_PARAMS=max_size=50\ max_success=50)
+target_include_directories(sparse_merkle_storage_db_adapter_property_test PRIVATE ${RAPIDCHECK_INCLUDE_DIRS})
 target_link_libraries(sparse_merkle_storage_db_adapter_property_test PUBLIC
     GTest::Main
     GTest::GTest
-    rapidcheck
-    util
-    corebft
-    kvbc
-    stdc++fs
-)
+    ${RAPIDCHECK_LIBRARIES}
+        util
+        corebft
+        kvbc
+        stdc++fs
+    )
 
 add_executable(sparse_merkle_internal_node_property_test sparse_merkle/internal_node_property_tests.cpp
 )
 add_test(sparse_merkle_internal_node_property_test sparse_merkle_internal_node_property_test)
+target_include_directories(sparse_merkle_internal_node_property_test PRIVATE ${RAPIDCHECK_INCLUDE_DIRS})
 target_link_libraries(sparse_merkle_internal_node_property_test PUBLIC
     GTest::Main
     GTest::GTest
-    rapidcheck
+    ${RAPIDCHECK_LIBRARIES}
     util
     kvbc
     OpenSSL::Crypto
@@ -119,96 +121,15 @@ target_link_libraries(multiIO_test PUBLIC
         corebft
 )
 
-add_executable(sparse_merkle_db_editor_test sparse_merkle_storage/sparse_merkle_db_editor_test.cpp )
-add_test(sparse_merkle_db_editor_test sparse_merkle_db_editor_test)
+add_executable(sparse_merkle_db_inspector_test sparse_merkle_storage/sparse_merkle_db_inspector_test.cpp )
+add_test(sparse_merkle_db_inspector_test sparse_merkle_db_inspector_test)
 
-target_link_libraries(sparse_merkle_db_editor_test PUBLIC
+target_link_libraries(sparse_merkle_db_inspector_test PUBLIC
     GTest::Main
     GTest::GTest
-    lib_sparse_merkle_db_editor
+    lib_sparse_merkle_db_inspector
     util
     kvbc
     stdc++fs
 )
 endif(BUILD_ROCKSDB_STORAGE)
-
-if(USE_S3_OBJECT_STORE)
-add_executable(s3_storage_factory_test s3_storage_factory_test.cpp )
-add_test(s3_storage_factory_test s3_storage_factory_test)
-target_include_directories(s3_storage_factory_test PUBLIC
-    kvbc
-)
-target_link_libraries(s3_storage_factory_test PUBLIC
-    GTest::Main
-    kvbc
-)
-endif(USE_S3_OBJECT_STORE)
-
-if (BUILD_ROCKSDB_STORAGE)
-    add_executable(categorized_kv_blockchain_unit_test
-        categorization/kv_blockchain_test.cpp )
-    add_test(categorized_kv_blockchain_unit_test categorized_kv_blockchain_unit_test)
-    target_link_libraries(categorized_kv_blockchain_unit_test PUBLIC
-        GTest::Main
-        GTest::GTest
-        util
-        corebft
-        kvbc
-        stdc++fs
-    )
-
-    add_executable(categorized_blocks_unit_test
-        categorization/blocks_test.cpp )
-    add_test(categorized_blocks_unit_test categorized_blocks_unit_test)
-    target_link_libraries(categorized_blocks_unit_test PUBLIC
-        GTest::Main
-        GTest::GTest
-        util
-        corebft
-        kvbc
-        stdc++fs
-    )
-
-    add_executable(categorized_blockchain_unit_test
-        categorization/blockchain_test.cpp )
-    add_test(categorized_blockchain_unit_test categorized_blockchain_unit_test)
-    target_link_libraries(categorized_blockchain_unit_test PUBLIC
-        GTest::Main
-        GTest::GTest
-        util
-        corebft
-        kvbc
-        stdc++fs
-    )
-    add_executable(immutable_kv_category_unit_test categorization/immutable_kv_category_unit_test.cpp )
-    add_test(immutable_kv_category_unit_test immutable_kv_category_unit_test)
-    target_link_libraries(immutable_kv_category_unit_test PUBLIC
-        GTest::Main
-        GTest::GTest
-        util
-        corebft
-        kvbc
-        stdc++fs
-    )
-
-    add_executable(block_merkle_category_unit_test categorization/block_merkle_category_unit_test.cpp )
-    add_test(block_merkle_category_unit_test block_merkle_category_unit_test)
-    target_link_libraries(block_merkle_category_unit_test PUBLIC
-        GTest::Main
-        GTest::GTest
-        util
-        kvbc
-        stdc++fs
-    )
-
-    add_executable(versioned_kv_category_unit_test categorization/versioned_kv_category_unit_test.cpp )
-    add_test(versioned_kv_category_unit_test versioned_kv_category_unit_test)
-    target_link_libraries(versioned_kv_category_unit_test PUBLIC
-        GTest::Main
-        GTest::GTest
-        util
-        corebft
-        kvbc
-        stdc++fs
-    )
-endif (BUILD_ROCKSDB_STORAGE)

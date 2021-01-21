@@ -53,20 +53,18 @@ class SignedShareBase : public MessageBase {
                                  SeqNum s,
                                  ReplicaId senderId,
                                  Digest& digest,
-                                 std::shared_ptr<IThresholdSigner> thresholdSigner,
-                                 const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
+                                 IThresholdSigner* thresholdSigner,
+                                 const std::string& spanContext = "");
   static SignedShareBase* create(int16_t type,
                                  ViewNum v,
                                  SeqNum s,
                                  ReplicaId senderId,
                                  const char* sig,
                                  uint16_t sigLen,
-                                 const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
+                                 const std::string& spanContext = "");
   void _validate(const ReplicasInfo& repInfo, int16_t type) const;
 
-  SignedShareBase(ReplicaId sender, int16_t type, const concordUtils::SpanContext& spanContext, size_t msgSize);
-
-  BFTENGINE_GEN_CONSTRUCT_FROM_BASE_MESSAGE(SignedShareBase)
+  SignedShareBase(ReplicaId sender, int16_t type, const std::string& spanContext, size_t msgSize);
 
   Header* b() const { return (Header*)msgBody_; }
 };
@@ -84,11 +82,8 @@ class PreparePartialMsg : public SignedShareBase {
                                    SeqNum s,
                                    ReplicaId senderId,
                                    Digest& ppDigest,
-                                   std::shared_ptr<IThresholdSigner> thresholdSigner,
-                                   const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  PreparePartialMsg(MessageBase* msgBase) : SignedShareBase(msgBase) {}
-
+                                   IThresholdSigner* thresholdSigner,
+                                   const std::string& spanContext = "");
   void validate(const ReplicasInfo&) const override;
 };
 
@@ -104,15 +99,8 @@ class PrepareFullMsg : public SignedShareBase {
   friend MsgSize maxMessageSize();
 
  public:
-  static PrepareFullMsg* create(ViewNum v,
-                                SeqNum s,
-                                ReplicaId senderId,
-                                const char* sig,
-                                uint16_t sigLen,
-                                const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  PrepareFullMsg(MessageBase* msgBase) : SignedShareBase(msgBase) {}
-
+  static PrepareFullMsg* create(
+      ViewNum v, SeqNum s, ReplicaId senderId, const char* sig, uint16_t sigLen, const std::string& spanContext = "");
   void validate(const ReplicasInfo&) const override;
 };
 
@@ -134,11 +122,8 @@ class CommitPartialMsg : public SignedShareBase {
                                   SeqNum s,
                                   ReplicaId senderId,
                                   Digest& ppDoubleDigest,
-                                  std::shared_ptr<IThresholdSigner> thresholdSigner,
-                                  const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  CommitPartialMsg(MessageBase* msgBase) : SignedShareBase(msgBase) {}
-
+                                  IThresholdSigner* thresholdSigner,
+                                  const std::string& spanContext = "");
   void validate(const ReplicasInfo&) const override;
 };
 
@@ -154,15 +139,8 @@ class CommitFullMsg : public SignedShareBase {
   friend MsgSize maxMessageSize();
 
  public:
-  static CommitFullMsg* create(ViewNum v,
-                               SeqNum s,
-                               ReplicaId senderId,
-                               const char* sig,
-                               uint16_t sigLen,
-                               const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  CommitFullMsg(MessageBase* msgBase) : SignedShareBase(msgBase) {}
-
+  static CommitFullMsg* create(
+      ViewNum v, SeqNum s, ReplicaId senderId, const char* sig, uint16_t sigLen, const std::string& spanContext = "");
   void validate(const ReplicasInfo&) const override;
 };
 

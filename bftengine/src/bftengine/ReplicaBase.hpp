@@ -103,11 +103,12 @@ class ReplicaBase {
  protected:
   static const uint16_t ALL_OTHER_REPLICAS = UINT16_MAX;
 
-  const ReplicaConfig& config_;
+  ReplicaConfig config_;
   ReplicasInfo* repsInfo = nullptr;
   std::shared_ptr<MsgsCommunicator> msgsCommunicator_;
   std::shared_ptr<MsgHandlersRegistrator> msgHandlers_;
 
+  // TODO [TK] move to ReplicaImpl
   // last SeqNum executed  by this replica (or its affect was transferred to this replica)
   SeqNum lastExecutedSeqNum = 0;
 

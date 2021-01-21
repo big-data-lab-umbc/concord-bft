@@ -20,7 +20,7 @@
 #include "assertUtils.hpp"
 
 namespace bftEngine {
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 namespace impl {
 
 static const uint16_t NO_REPLICA = UINT16_MAX;
@@ -32,7 +32,7 @@ class SourceSelector {
   SourceSelector(std::set<uint16_t> allOtherReplicas,
                  uint32_t retransmissionTimeoutMilli,
                  uint32_t sourceReplicaReplacementTimeoutMilli)
-      : allOtherReplicas_(std::move(allOtherReplicas)),
+      : allOtherReplicas_(allOtherReplicas),
         randomGen_(std::random_device()()),
         retransmissionTimeoutMilli_(retransmissionTimeoutMilli),
         sourceReplacementTimeoutMilli_(sourceReplicaReplacementTimeoutMilli) {}
@@ -86,5 +86,5 @@ class SourceSelector {
   uint32_t sourceReplacementTimeoutMilli_;
 };
 }  // namespace impl
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 }  // namespace bftEngine

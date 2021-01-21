@@ -42,7 +42,6 @@ class FileStorage : public MetadataStorage {
   void writeInBatch(uint32_t objectId, char *data, uint32_t dataLength) override;
 
   void commitAtomicWriteOnlyBatch() override;
-  void eraseData() override;
 
  private:
   void read(void *dataPtr, size_t offset, size_t itemSize, size_t count, const char *errorMsg);
@@ -55,7 +54,6 @@ class FileStorage : public MetadataStorage {
   void updateFileObjectMetadata(MetadataObjectInfo &objectInfo);
   void verifyFileMetadataSetup() const;
   void verifyOperation(uint32_t objectId, uint32_t dataLen, const char *buffer) const;
-  void cleanStorage();
 
  private:
   const char *WRONG_NUM_OF_OBJ_READ = "Failed to read a number of objects or it is 0";

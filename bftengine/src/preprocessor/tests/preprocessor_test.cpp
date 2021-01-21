@@ -43,28 +43,30 @@ const uint16_t reqWaitTimeoutMilli = 50;
 const ReqId reqSeqNum = 123456789;
 const uint16_t clientId = 9;
 const string cid = "abcd";
-const concordUtils::SpanContext span;
+const string sp = "span";
 const NodeIdType replica_0 = 0;
 const NodeIdType replica_1 = 1;
 const NodeIdType replica_2 = 2;
 const NodeIdType replica_3 = 3;
 const NodeIdType replica_4 = 4;
-PreProcessorRecorder preProcessorRecorder;
 
-uint64_t reqRetryId = 20;
-
-ReplicaConfig& replicaConfig = ReplicaConfig::instance();
+ReplicaConfig replicaConfig;
 char buf[bufLen];
 SigManagerSharedPtr sigManager_[numOfReplicas_4];
 
 class DummyRequestsHandler : public IRequestsHandler {
-  void execute(ExecutionRequestsQueue& requests,
-               const std::string& batchCid,
-               concordUtils::SpanWrapper& parent_span) override {
-    for (auto& req : requests) {
-      req.outActualReplySize = 256;
-      req.outExecutionStatus = 0;
-    }
+  int execute(uint16_t client,
+              uint64_t sequenceNum,
+              uint8_t flags,
+              uint32_t requestSize,
+              const char* request,
+              uint32_t maxReplySize,
+              char* outReply,
+              uint32_t& outActualReplySize,
+              uint32_t& outActualReplicaSpecificInfoSize,
+              concordUtils::SpanWrapper& span) override {
+    outActualReplySize = 256;
+    return 0;
   }
 
   std::shared_ptr<ControlHandlers> getControlHandlers() override { return nullptr; }
@@ -90,24 +92,25 @@ class DummyReplica : public InternalReplicaApi {
   explicit DummyReplica(bftEngine::impl::ReplicasInfo replicasInfo) : replicasInfo_(move(replicasInfo)) {}
 
   const bftEngine::impl::ReplicasInfo& getReplicasInfo() const override { return replicasInfo_; }
-  bool isValidClient(NodeIdType) const override { return true; }
-  bool isIdOfReplica(NodeIdType) const override { return false; }
+  bool isValidClient(NodeIdType client) const override { return true; }
+  bool isIdOfReplica(NodeIdType id) const override { return false; }
   const set<ReplicaId>& getIdsOfPeerReplicas() const override { return replicaIds_; }
   ViewNum getCurrentView() const override { return 0; }
   ReplicaId currentPrimary() const override { return replicaConfig.replicaId; }
   bool isCurrentPrimary() const override { return primary_; }
   bool currentViewIsActive() const override { return true; }
-  ReqId seqNumberOfLastReplyToClient(NodeIdType) const override { return 1; }
-  bool isClientRequestInProcess(NodeIdType, ReqId) const override { return false; }
+  ReqId seqNumberOfLastReplyToClient(NodeIdType client) const override { return 1; }
 
   IncomingMsgsStorage& getIncomingMsgsStorage() override { return *incomingMsgsStorage_; }
   util::SimpleThreadPool& getInternalThreadPool() override { return pool_; }
   bool isCollectingState() const override { return false; }
 
   const ReplicaConfig& getReplicaConfig() const override { return replicaConfig; }
-  SeqNum getPrimaryLastUsedSeqNum() const override { return 0; }
-  uint64_t getRequestsInQueue() const override { return 0; }
-  SeqNum getLastExecutedSeqNum() const override { return 0; }
+
+  IThresholdVerifier* getThresholdVerifierForExecution() override { return nullptr; }
+  IThresholdVerifier* getThresholdVerifierForSlowPathCommit() override { return nullptr; }
+  IThresholdVerifier* getThresholdVerifierForCommit() override { return nullptr; }
+  IThresholdVerifier* getThresholdVerifierForOptimisticCommit() override { return nullptr; }
 
   void setPrimary(bool primary) { primary_ = primary; };
 
@@ -287,6 +290,8 @@ void setUpConfiguration_4() {
   replicaConfig.replicaPrivateKey = privateKey_0;
   string privateKeys[numOfReplicas_4] = {privateKey_0, privateKey_1, privateKey_2, privateKey_3};
 
+  replicaConfig.singletonFromThis();
+
   for (auto i = 0; i < replicaConfig.numReplicas; i++)
     sigManager_[i] = make_shared<SigManager>(
         i, replicaConfig.numReplicas + numOfClients, privateKeys[i], replicaConfig.publicKeysOfReplicas);
@@ -317,23 +322,15 @@ void setUpCommunication() {
 }
 
 PreProcessReplyMsgSharedPtr preProcessNonPrimary(NodeIdType replicaId, const bftEngine::impl::ReplicasInfo& repInfo) {
-  auto preProcessReplyMsg = make_shared<PreProcessReplyMsg>(
-      sigManager_[replicaId], &preProcessorRecorder, replicaId, clientId, reqSeqNum, reqRetryId);
-  preProcessReplyMsg->setupMsgBody(buf, bufLen, "", STATUS_GOOD);
+  auto preProcessReplyMsg = make_shared<PreProcessReplyMsg>(sigManager_[replicaId], replicaId, clientId, reqSeqNum);
+  preProcessReplyMsg->setupMsgBody(buf, bufLen, "");
   preProcessReplyMsg->validate(repInfo);
   return preProcessReplyMsg;
-}
-
-void clearDiagnosticsHandlers() {
-  auto& registrar = concord::diagnostics::RegistrarSingleton::getInstance();
-  registrar.perf.clear();
-  registrar.status.clear();
 }
 
 TEST(requestPreprocessingState_test, notEnoughRepliesReceived) {
   RequestProcessingState reqState(replicaConfig.numReplicas,
                                   clientId,
-                                  cid,
                                   reqSeqNum,
                                   ClientPreProcessReqMsgUniquePtr(),
                                   PreProcessRequestMsgSharedPtr());
@@ -344,13 +341,11 @@ TEST(requestPreprocessingState_test, notEnoughRepliesReceived) {
   }
   reqState.handlePrimaryPreProcessed(buf, bufLen);
   ConcordAssert(reqState.definePreProcessingConsensusResult() == CONTINUE);
-  clearDiagnosticsHandlers();
 }
 
 TEST(requestPreprocessingState_test, allRepliesReceivedButNotEnoughSameHashesCollected) {
   RequestProcessingState reqState(replicaConfig.numReplicas,
                                   clientId,
-                                  cid,
                                   reqSeqNum,
                                   ClientPreProcessReqMsgUniquePtr(),
                                   PreProcessRequestMsgSharedPtr());
@@ -368,7 +363,6 @@ TEST(requestPreprocessingState_test, allRepliesReceivedButNotEnoughSameHashesCol
 TEST(requestPreprocessingState_test, enoughSameRepliesReceived) {
   RequestProcessingState reqState(replicaConfig.numReplicas,
                                   clientId,
-                                  cid,
                                   reqSeqNum,
                                   ClientPreProcessReqMsgUniquePtr(),
                                   PreProcessRequestMsgSharedPtr());
@@ -380,13 +374,11 @@ TEST(requestPreprocessingState_test, enoughSameRepliesReceived) {
   }
   reqState.handlePrimaryPreProcessed(buf, bufLen);
   ConcordAssert(reqState.definePreProcessingConsensusResult() == COMPLETE);
-  clearDiagnosticsHandlers();
 }
 
 TEST(requestPreprocessingState_test, primaryReplicaPreProcessingRetrySucceeds) {
   RequestProcessingState reqState(replicaConfig.numReplicas,
                                   clientId,
-                                  cid,
                                   reqSeqNum,
                                   ClientPreProcessReqMsgUniquePtr(),
                                   PreProcessRequestMsgSharedPtr());
@@ -402,13 +394,11 @@ TEST(requestPreprocessingState_test, primaryReplicaPreProcessingRetrySucceeds) {
   memset(buf, '4', bufLen);
   reqState.handlePrimaryPreProcessed(buf, bufLen);
   ConcordAssert(reqState.definePreProcessingConsensusResult() == COMPLETE);
-  clearDiagnosticsHandlers();
 }
 
 TEST(requestPreprocessingState_test, primaryReplicaDidNotCompletePreProcessingWhileNonPrimariesDid) {
   RequestProcessingState reqState(replicaConfig.numReplicas,
                                   clientId,
-                                  cid,
                                   reqSeqNum,
                                   ClientPreProcessReqMsgUniquePtr(),
                                   PreProcessRequestMsgSharedPtr());
@@ -440,7 +430,6 @@ TEST(requestPreprocessingState_test, requestTimedOut) {
   usleep(replicaConfig.preExecReqStatusCheckTimerMillisec * 1000);
   timers.evaluate();
   ConcordAssert(preProcessor.getOngoingReqIdForClient(clientId) == 0);
-  clearDiagnosticsHandlers();
 }
 
 TEST(requestPreprocessingState_test, primaryCrashDetected) {
@@ -461,7 +450,6 @@ TEST(requestPreprocessingState_test, primaryCrashDetected) {
   usleep(reqWaitTimeoutMilli * 1000);
   timers.evaluate();
   ConcordAssert(preProcessor.getOngoingReqIdForClient(clientId) == 0);
-  clearDiagnosticsHandlers();
 }
 
 TEST(requestPreprocessingState_test, primaryCrashNotDetected) {
@@ -482,12 +470,11 @@ TEST(requestPreprocessingState_test, primaryCrashNotDetected) {
   ConcordAssert(preProcessor.getOngoingReqIdForClient(clientId) == reqSeqNum);
 
   auto* preProcessReqMsg =
-      new PreProcessRequestMsg(replica.currentPrimary(), clientId, reqSeqNum, reqRetryId, bufLen, buf, cid, span);
+      new PreProcessRequestMsg(replica.currentPrimary(), clientId, reqSeqNum, bufLen, buf, sp, cid);
   msgHandlerCallback = msgHandlersRegPtr->getCallback(bftEngine::impl::MsgCode::PreProcessRequest);
   msgHandlerCallback(preProcessReqMsg);
   usleep(reqWaitTimeoutMilli * 1000 / 2);  // Wait for the pre-execution completion
   ConcordAssert(preProcessor.getOngoingReqIdForClient(clientId) == 0);
-  clearDiagnosticsHandlers();
 }
 
 }  // end namespace
@@ -496,7 +483,7 @@ int main(int argc, char** argv) {
   ::testing::InitGoogleTest(&argc, argv);
   logging::initLogger("logging.properties");
   setUpConfiguration_4();
-  RequestProcessingState::init(numOfRequiredReplies, &preProcessorRecorder);
+  RequestProcessingState::init(numOfRequiredReplies);
   const chrono::milliseconds msgTimeOut(20000);
   msgsStorage = make_shared<IncomingMsgsStorageImp>(msgHandlersRegPtr, msgTimeOut, replicaConfig.replicaId);
   setUpCommunication();

@@ -20,7 +20,6 @@
 #include "threshsign/IThresholdSigner.h"
 #include "threshsign/IThresholdVerifier.h"
 #include "threshsign/IPublicKey.h"
-#include "CryptoManager.hpp"
 
 class IShareSecretKeyDummy : public IShareSecretKey {
  public:
@@ -32,7 +31,8 @@ class IShareVerificationKeyDummy : public IShareVerificationKey {
   std::string toString() const override { return "IShareVerificationKeyDummy"; }
 };
 
-class IThresholdSignerDummy : public IThresholdSigner {
+class IThresholdSignerDummy : public IThresholdSigner,
+                              public concord::serialize::SerializableFactory<IThresholdSignerDummy> {
  public:
   int requiredLengthForSignedData() const override { return 2048; }
   void signData(const char *hash, int hashLen, char *outSig, int outSigLen) override {
@@ -41,6 +41,9 @@ class IThresholdSignerDummy : public IThresholdSigner {
 
   const IShareSecretKey &getShareSecretKey() const override { return shareSecretKey; }
   const IShareVerificationKey &getShareVerificationKey() const override { return shareVerifyKey; }
+  const std::string getVersion() const override { return "1"; }
+  void serializeDataMembers(std::ostream &outStream) const override {}
+  void deserializeDataMembers(std::istream &outStream) override {}
   IShareSecretKeyDummy shareSecretKey;
   IShareVerificationKeyDummy shareVerifyKey;
 };
@@ -52,29 +55,29 @@ class IThresholdAccumulatorDummy : public IThresholdAccumulator {
   bool hasShareVerificationEnabled() const override { return true; }
   int getNumValidShares() const override { return 0; }
   void getFullSignedData(char *outThreshSig, int threshSigLen) override {}
+  IThresholdAccumulator *clone() override { return nullptr; }
 };
 
-class IThresholdVerifierDummy : public IThresholdVerifier {
+class IThresholdVerifierDummy : public IThresholdVerifier,
+                                public concord::serialize::SerializableFactory<IThresholdVerifierDummy> {
  public:
   IThresholdAccumulator *newAccumulator(bool withShareVerification) const override {
     return new IThresholdAccumulatorDummy;
   }
+  void release(IThresholdAccumulator *acc) override {}
   bool verify(const char *msg, int msgLen, const char *sig, int sigLen) const override { return true; }
   int requiredLengthForSignedData() const override { return 2048; }
   const IPublicKey &getPublicKey() const override { return shareVerifyKey; }
   const IShareVerificationKey &getShareVerificationKey(ShareID signer) const override { return shareVerifyKey; }
 
+  const std::string getVersion() const override { return "1"; }
+  void serializeDataMembers(std::ostream &outStream) const override {}
+  void deserializeDataMembers(std::istream &outStream) override {}
   IShareVerificationKeyDummy shareVerifyKey;
 };
 
-class TestCryptoSystem : public Cryptosystem {
- public:
-  TestCryptoSystem() = default;
-  IThresholdVerifier *createThresholdVerifier(uint16_t threshold = 0) override { return new IThresholdVerifierDummy; }
-  IThresholdSigner *createThresholdSigner() override { return new IThresholdSignerDummy; }
-};
-
-bftEngine::ReplicaConfig &createReplicaConfig();
+bftEngine::ReplicaConfig createReplicaConfig();
+void destroyReplicaConfig(bftEngine::ReplicaConfig &config);
 
 inline void printBody(const char *body, size_t size) {
   for (size_t i = 0; i < size; ++i) {
@@ -87,7 +90,7 @@ template <typename MessageT>
 void testMessageBaseMethods(const MessageT &tested, MsgType type, NodeIdType senderId, const std::string &spanContext) {
   EXPECT_EQ(tested.senderId(), senderId);
   EXPECT_EQ(tested.type(), type);
-  EXPECT_EQ(tested.template spanContext<MessageT>().data(), spanContext);
+  EXPECT_EQ(tested.template spanContext<MessageT>(), spanContext);
   EXPECT_EQ(tested.spanContextSize(), spanContext.size());
 
   std::unique_ptr<MessageBase> other{tested.cloneObjAndMsg()};

@@ -54,10 +54,6 @@ static const std::string kHashesToTest[1] = {
     "e4adbc629e06dc636b65872072cdf084ee5a7e0a63afe42931025d4e5ed60d069cfa71d91bc7"
     "451a8a2109529181fd150fc055ad42ce5c30c9512cd64ee3789f8c0d0069501be65f1950"};
 
-// Since ReplicaConfig is a singleton and the test requires several instances,
-// we need to define a replica config for tests.
-class TestReplicaConfig : public bftEngine::ReplicaConfig {};
-
 // Helper functions to main acting as sub-components of the test.
 
 // validateFundamentalFields and validateConfigStructIntegrity are sanity checks
@@ -65,7 +61,7 @@ class TestReplicaConfig : public bftEngine::ReplicaConfig {};
 // validate they are in order before attempting tests of the actual
 // cryptographic keys.
 
-static bool validateFundamentalFields(const std::vector<TestReplicaConfig>& configs) {
+static bool validateFundamentalFields(const std::vector<bftEngine::ReplicaConfig>& configs) {
   uint16_t numReplicas = configs.size() - configs.front().numRoReplicas;
   uint16_t fVal = configs.front().fVal;
   uint16_t cVal = configs.front().cVal;
@@ -88,7 +84,7 @@ static bool validateFundamentalFields(const std::vector<TestReplicaConfig>& conf
   }
 
   for (uint16_t i = 0; i < numReplicas; ++i) {
-    const TestReplicaConfig& config = configs[i];
+    const bftEngine::ReplicaConfig& config = configs[i];
     if (config.replicaId != i) {
       std::cout << "FAILURE: Key file " << i << " specifies a replica ID disagreeing with its filename.\n";
       return false;
@@ -112,6 +108,71 @@ static bool validateFundamentalFields(const std::vector<TestReplicaConfig>& conf
                 << " has a C"
                    " value inconsistent with replica(s) 0 through "
                 << (i - 1) << ".\n";
+      return false;
+    }
+  }
+
+  return true;
+}
+
+static bool validateConfigStructIntegrity(const std::vector<bftEngine::ReplicaConfig>& configs) {
+  uint16_t numReplicas = configs.size();
+
+  for (uint16_t i = 0; i < numReplicas; ++i) {
+    const bftEngine::ReplicaConfig& config = configs[i];
+    if (config.publicKeysOfReplicas.size() != numReplicas) {
+      std::cout << "FAILURE: Size of the set of public keys of replicas in replica " << i
+                << "'s key file does not match the number of replicas" << numReplicas << ".\n";
+      return false;
+    }
+
+    std::set<uint16_t> foundIDs;
+    for (auto& entry : config.publicKeysOfReplicas) {
+      uint16_t id = entry.first;
+      if (id >= numReplicas) {
+        std::cout << "FAILURE: Entry with invalid replica ID (" << id
+                  << ") in set of public keys of replicas for replica " << i << ".\n";
+        return false;
+      }
+      if (foundIDs.count(id) > 0) {
+        std::cout << "FAILURE: Set of public keys of replicas for replica " << i
+                  << " contains duplicate entries for replica " << id << ".\n";
+        return false;
+      }
+      foundIDs.insert(id);
+    }
+    if (config.isReadOnly) continue;
+
+    if (!config.thresholdSignerForExecution) {
+      std::cout << "FAILURE: No threshold signer for execution for replica " << i << ".\n";
+      return false;
+    }
+    if (!config.thresholdVerifierForExecution) {
+      std::cout << "FAILURE: No threshold verifier for execution for replica " << i << ".\n";
+      return false;
+    }
+    if (!config.thresholdSignerForSlowPathCommit) {
+      std::cout << "FAILURE: No threshold signer for slow path commit for replica " << i << ".\n";
+      return false;
+    }
+    if (!config.thresholdVerifierForSlowPathCommit) {
+      std::cout << "FAILURE: No threshold verifier for slow path commit for replica " << i << ".\n";
+      return false;
+    }
+    if (!config.thresholdSignerForCommit) {
+      std::cout << "FAILURE: No threshold signer for commit for replica " << i << ".\n";
+      return false;
+    }
+    if (!config.thresholdVerifierForCommit) {
+      std::cout << "FAILURE: No threshold verifier for commit for replica " << i << ".\n";
+      return false;
+    }
+    if (!config.thresholdSignerForOptimisticCommit) {
+      std::cout << "FAILURE: No threshold signer for optimistic commit for replica " << i << ".\n";
+      return false;
+    }
+    if (!config.thresholdVerifierForOptimisticCommit) {
+      std::cout << "FAILURE: No threshold verifier for optimistic commit for replica " << i << ".\n";
       return false;
     }
   }
@@ -196,7 +257,7 @@ static bool testRSAKeyPair(const std::string& privateKey, const std::string& pub
 
 // Test that the RSA key pairs given in the keyfiles work, that the keyfiles
 // agree on what the public keys are, and that there are no duplicates.
-static bool testRSAKeys(const std::vector<TestReplicaConfig>& configs) {
+static bool testRSAKeys(const std::vector<bftEngine::ReplicaConfig>& configs) {
   uint16_t numReplicas = configs.size();
 
   std::cout << "Testing " << numReplicas << " RSA key pairs...\n";
@@ -333,6 +394,21 @@ static std::vector<std::vector<uint16_t>> getThresholdSignerCombinationsToTest(u
   return signerCombinations;
 }
 
+// Helper function to testThresholdSignature used to release accumulators, which
+// is done through the verifier that created the accumulator, which we do not
+// trust not to throw an exception during the release process because we do not
+// trust that the keys we constructed it with were valid.
+static bool releaseAccumulator(IThresholdVerifier* verifier, IThresholdAccumulator* accumulator) {
+  if (accumulator) {
+    try {
+      verifier->release(accumulator);
+    } catch (std::exception& e) {
+      return false;
+    }
+  }
+  return true;
+}
+
 // Helper function to testThresholdCryptosystem for testing a single signature.
 //
 // Note we cannot accept signers and verifier as const because
@@ -354,10 +430,10 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
   for (const auto& hash : kHashesToTest) {
     int hashLength = hash.length();
 
-    std::shared_ptr<IThresholdAccumulator> accumulator = nullptr;
+    IThresholdAccumulator* accumulator = nullptr;
 
     try {
-      accumulator.reset(verifier->newAccumulator(true));
+      accumulator = verifier->newAccumulator(true);
 
       // It is necessary to try to catch an exception from newAccumulator and
       // then construct an accumulator with verification disabled (and make sure
@@ -371,9 +447,10 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
       // not.
     } catch (std::exception& e) {
       try {
-        accumulator.reset(verifier->newAccumulator(false));
+        accumulator = verifier->newAccumulator(false);
       } catch (std::exception& e) {
         std::cout << invalidPublicConfig;
+        releaseAccumulator(verifier, accumulator);
         return false;
       }
     }
@@ -383,6 +460,7 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
       verificationEnabled = accumulator->hasShareVerificationEnabled();
     } catch (std::exception& e) {
       std::cout << invalidPublicConfig;
+      releaseAccumulator(verifier, accumulator);
       return false;
     }
 
@@ -391,6 +469,7 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
         accumulator->setExpectedDigest(reinterpret_cast<const unsigned char*>(hash.c_str()), hashLength);
       } catch (std::exception& e) {
         std::cout << invalidPublicConfig;
+        releaseAccumulator(verifier, accumulator);
         return false;
       }
     }
@@ -401,11 +480,13 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
         accumulatorSize = accumulator->getNumValidShares();
       } catch (std::exception& e) {
         std::cout << invalidPublicConfig;
+        releaseAccumulator(verifier, accumulator);
         return false;
       }
       if (accumulatorSize != 0) {
         std::cout << "FAILURE: Newly created signature accumulator for " << cryptosystemName
                   << " threshold cryptosystem reports already having valid signatures.\n";
+        releaseAccumulator(verifier, accumulator);
         return false;
       }
     }
@@ -419,6 +500,7 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
         sigShareLen = signer->requiredLengthForSignedData();
       } catch (std::exception& e) {
         std::cout << invalidPrivateKey;
+        releaseAccumulator(verifier, accumulator);
         return false;
       }
       char* sigShareBuf = new char[sigShareLen];
@@ -426,6 +508,7 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
         signer->signData(hash.c_str(), hashLength, sigShareBuf, sigShareLen);
       } catch (std::exception& e) {
         std::cout << invalidPrivateKey;
+        releaseAccumulator(verifier, accumulator);
         delete[] sigShareBuf;
         return false;
       }
@@ -434,6 +517,7 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
         addRes = accumulator->add(sigShareBuf, sigShareLen);
       } catch (std::exception& e) {
         std::cout << invalidKeyset;
+        releaseAccumulator(verifier, accumulator);
         delete[] sigShareBuf;
         return false;
       }
@@ -447,6 +531,7 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
         if (((accumulatorSize + 1) <= threshold) && (addRes != (accumulatorSize + 1))) {
           std::cout << "FAILURE: Signature accumulator could not validate replica " << signerID << "'s signature for "
                     << cryptosystemName << " threshold cryptosystem.\n";
+          releaseAccumulator(verifier, accumulator);
           return false;
         } else {
           accumulatorSize = addRes;
@@ -459,6 +544,7 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
       signatureLength = verifier->requiredLengthForSignedData();
     } catch (std::exception& e) {
       std::cout << invalidPublicConfig;
+      releaseAccumulator(verifier, accumulator);
       return false;
     }
     char* sigBuf = new char[signatureLength];
@@ -466,6 +552,7 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
       accumulator->getFullSignedData(sigBuf, signatureLength);
     } catch (std::exception& e) {
       std::cout << invalidKeyset << e.what() << std::endl;
+      releaseAccumulator(verifier, accumulator);
       delete[] sigBuf;
       return false;
     }
@@ -475,11 +562,16 @@ static bool testThresholdSignature(const std::string& cryptosystemName,
       signatureAccepted = verifier->verify(hash.c_str(), hashLength, sigBuf, signatureLength);
     } catch (std::exception& e) {
       std::cout << invalidKeyset;
+      releaseAccumulator(verifier, accumulator);
       delete[] sigBuf;
       return false;
     }
 
     delete[] sigBuf;
+    if (!releaseAccumulator(verifier, accumulator)) {
+      std::cout << invalidKeyset;
+      return false;
+    }
 
     if (signatureAccepted != (participatingSigners >= threshold)) {
       std::cout << "FAILURE: Threshold signer with " << participatingSigners << " signatures unexpectedly "
@@ -526,20 +618,15 @@ static bool testThresholdCryptosystem(const std::string& name,
   // keys for this cryptosystem.
   for (uint16_t i = 0; i < numSigners; ++i) {
     IThresholdVerifier* verifier = verifiers[i];
-    try {
-      if (verifier->getPublicKey().toString() != referenceVerifier->getPublicKey().toString()) {
-        std::cout << "FAILURE: Replica " << i
-                  << "'s key file"
-                     " has the wrong public key for the "
-                  << name
-                  << " threshold"
-                     " cryptosystem.\n";
-        return false;
-      }
-    } catch (std::exception& e) {
-      // BLSMultisigVerifier::getPublicKey() throws if k-out-of-n, k < n
+    if (verifier->getPublicKey().toString() != referenceVerifier->getPublicKey().toString()) {
+      std::cout << "FAILURE: Replica " << i
+                << "'s key file"
+                   " has the wrong public key for the "
+                << name
+                << " threshold"
+                   " cryptosystem.\n";
+      return false;
     }
-
     for (uint16_t j = 0; j < numSigners; ++j) {
       if (verifier->getShareVerificationKey(j).toString() != referenceVerifier->getShareVerificationKey(j).toString()) {
         std::cout << "FAILURE: Replica " << i
@@ -578,21 +665,13 @@ static bool testThresholdCryptosystem(const std::string& name,
 
 // Tests all threshold cryptosystems given in the keyfiles by calling
 // testThresholdCryptosystem for each of them.
-static bool testThresholdKeys(const std::vector<TestReplicaConfig>& configs,
-                              std::vector<std::unique_ptr<Cryptosystem>>& cryptoSystems) {
+static bool testThresholdKeys(const std::vector<bftEngine::ReplicaConfig>& configs) {
   uint16_t numReplicas = configs.size() - configs.front().numRoReplicas;
-
-  for (uint16_t i = 0; i < numReplicas; ++i) {
-    std::cout << "System " << i << "\nshare verification keys:\n";
-    for (auto&& sharedKey : cryptoSystems[i]->getSystemVerificationKeys()) std::cout << sharedKey << "\n";
-    std::cout << "share secret key:\n"
-              << cryptoSystems[i]->getPrivateKey(i + 1) << "\n"
-              << "----------------------------------------------------------\n";
-  }
 
   // Compute thresholds.
   uint16_t f = configs.front().fVal;
   uint16_t c = configs.front().cVal;
+  uint16_t execThresh = f + 1;
   uint16_t slowThresh = f * 2 + c + 1;
   uint16_t commitThresh = f * 3 + c + 1;
   uint16_t optThresh = f * 3 + c * 2 + 1;
@@ -602,26 +681,80 @@ static bool testThresholdKeys(const std::vector<TestReplicaConfig>& configs,
   std::vector<IThresholdSigner*> signers;
   std::vector<IThresholdVerifier*> verifiers;
 
-  // same signers for all
-  for (uint16_t i = 0; i < numReplicas; ++i) signers.push_back(cryptoSystems[i]->createThresholdSigner());
-
-  for (uint16_t i = 0; i < numReplicas; ++i) verifiers.push_back(cryptoSystems[i]->createThresholdVerifier(slowThresh));
-  if (!testThresholdCryptosystem("slow path commit", signers, verifiers, numReplicas, slowThresh)) return false;
-
-  verifiers.clear();
-  for (uint16_t i = 0; i < numReplicas; ++i)
-    verifiers.push_back(cryptoSystems[i]->createThresholdVerifier(commitThresh));
-  if (!testThresholdCryptosystem("commit", signers, verifiers, numReplicas, commitThresh)) return false;
-
-  verifiers.clear();
-  for (uint16_t i = 0; i < numReplicas; ++i) verifiers.push_back(cryptoSystems[i]->createThresholdVerifier(optThresh));
-
-  if (!testThresholdCryptosystem("optimistic fast path commit", signers, verifiers, numReplicas, optThresh))
+  for (uint16_t i = 0; i < numReplicas; ++i) {
+    signers.push_back(configs[i].thresholdSignerForExecution);
+    verifiers.push_back(configs[i].thresholdVerifierForExecution);
+  }
+  if (!testThresholdCryptosystem("execution", signers, verifiers, numReplicas, execThresh)) {
     return false;
+  }
+
+  signers.clear();
+  verifiers.clear();
+  for (uint16_t i = 0; i < numReplicas; ++i) {
+    signers.push_back(configs[i].thresholdSignerForSlowPathCommit);
+    verifiers.push_back(configs[i].thresholdVerifierForSlowPathCommit);
+  }
+  if (!testThresholdCryptosystem("slow path commit", signers, verifiers, numReplicas, slowThresh)) {
+    return false;
+  }
+
+  signers.clear();
+  verifiers.clear();
+  for (uint16_t i = 0; i < numReplicas; ++i) {
+    signers.push_back(configs[i].thresholdSignerForCommit);
+    verifiers.push_back(configs[i].thresholdVerifierForCommit);
+  }
+  if (!testThresholdCryptosystem("commit", signers, verifiers, numReplicas, commitThresh)) {
+    return false;
+  }
+
+  signers.clear();
+  verifiers.clear();
+  for (uint16_t i = 0; i < numReplicas; ++i) {
+    signers.push_back(configs[i].thresholdSignerForOptimisticCommit);
+    verifiers.push_back(configs[i].thresholdVerifierForOptimisticCommit);
+  }
+  if (!testThresholdCryptosystem("optimistic fast path commit", signers, verifiers, numReplicas, optThresh)) {
+    return false;
+  }
 
   std::cout << "All threshold cryptography tests were successful.\n";
 
   return true;
+}
+
+// Function to simplify the process of freeing the dynamically allocated memory
+// referenced by each ReplicaConfig struct, which the main function below may
+// need to do in one of several places because it may return early in the event
+// of a failure.
+static void freeConfigs(const std::vector<bftEngine::ReplicaConfig>& configs) {
+  for (const auto& config : configs) {
+    if (config.thresholdSignerForExecution) {
+      delete config.thresholdSignerForExecution;
+    }
+    if (config.thresholdVerifierForExecution) {
+      delete config.thresholdVerifierForExecution;
+    }
+    if (config.thresholdSignerForSlowPathCommit) {
+      delete config.thresholdSignerForSlowPathCommit;
+    }
+    if (config.thresholdVerifierForSlowPathCommit) {
+      delete config.thresholdVerifierForSlowPathCommit;
+    }
+    if (config.thresholdSignerForCommit) {
+      delete config.thresholdSignerForCommit;
+    }
+    if (config.thresholdVerifierForCommit) {
+      delete config.thresholdVerifierForCommit;
+    }
+    if (config.thresholdSignerForOptimisticCommit) {
+      delete config.thresholdSignerForOptimisticCommit;
+    }
+    if (config.thresholdVerifierForOptimisticCommit) {
+      delete config.thresholdVerifierForOptimisticCommit;
+    }
+  }
 }
 
 // Helper function for determining whether --help was given.
@@ -699,6 +832,7 @@ int main(int argc, char** argv) {
         }
         outputPrefix = argv[i + 1];
         ++i;
+
       } else {
         std::cout << "Unrecognized command line option: " << option << ".\n";
         return -1;
@@ -719,40 +853,44 @@ int main(int argc, char** argv) {
               << "-replica Concord"
                  " deployment...\n";
 
-    std::vector<TestReplicaConfig> configs(numReplicas + ro);
-    std::vector<std::unique_ptr<Cryptosystem>> cryptoSystems;
+    std::vector<bftEngine::ReplicaConfig> configs(numReplicas + ro);
 
     for (uint16_t i = 0; i < numReplicas + ro; ++i) {
       std::string filename = outputPrefix + std::to_string(i);
-      cryptoSystems.push_back(std::unique_ptr<Cryptosystem>(inputReplicaKeyfileMultisig(filename, configs[i])));
+      if (!inputReplicaKeyfile(filename, configs[i])) {
+        std::cout << "FAILURE: Failed to input keyfile " << filename << "; this keyfile is invalid.\n";
+        freeConfigs(configs);
+        return -1;
+      } else {
+        std::cout << "Succesfully input keyfile " << filename << ".\n";
+      }
     }
 
-    std::cout << "All keyfiles were successfully read.\n";
+    std::cout << "All keyfiles were input successfully.\n";
 
-    std::cout << "Verifying sanity of the cryptographic configurations...\n";
+    std::cout << "Verifying sanity of the cryptographic configuratigurations read from the keyfiles...\n";
     if (!validateFundamentalFields(configs)) {
+      freeConfigs(configs);
+      return -1;
+    }
+    if (!validateConfigStructIntegrity(configs)) {
+      freeConfigs(configs);
       return -1;
     }
     std::cout << "Cryptographic configurations read appear to be sane.\n";
     std::cout << "Testing key functionality and agreement...\n";
     if (!testRSAKeys(configs)) {
+      freeConfigs(configs);
       return -1;
     }
-    if (!testThresholdKeys(configs, cryptoSystems)) {
+    if (!testThresholdKeys(configs)) {
+      freeConfigs(configs);
       return -1;
     }
-
-    // generate new threshold keypair for cryptosystem 0 and re-check the cryptosystems
-    auto keyPair = cryptoSystems[0]->generateNewKeyPair();
-    cryptoSystems[0]->updateKeys(keyPair.first, keyPair.second);
-    for (uint16_t i = 1; i < numReplicas; ++i) cryptoSystems[i]->updateVerificationKey(keyPair.second, 1);
-
-    if (!testThresholdKeys(configs, cryptoSystems)) {
-      return -1;
-    }
-
     std::cout << "Done testing all keys.\n";
     std::cout << "TestGeneratedKeys: SUCCESS.\n";
+
+    freeConfigs(configs);
 
     return 0;
   } catch (std::exception& e) {

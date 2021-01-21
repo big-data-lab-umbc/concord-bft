@@ -16,7 +16,8 @@
 
 #include "BlsPublicParameters.h"
 
-namespace BLS::Relic {
+namespace BLS {
+namespace Relic {
 
 class BlsThresholdKeygenBase;
 
@@ -67,10 +68,10 @@ class BlsThresholdFactory : public IThresholdFactory {
    * @return an IThresholdVerifier object that can be used to verify signature shares, assemble the threshold signature
    * and verify it as well
    */
-  IThresholdVerifier* newVerifier(NumSharesType reqSigners,
-                                  NumSharesType numSigners,
-                                  const char* publicKeyStr,
-                                  const std::vector<std::string>& verifKeysStr) const override;
+  virtual IThresholdVerifier* newVerifier(NumSharesType reqSigners,
+                                          NumSharesType numSigners,
+                                          const char* publicKeyStr,
+                                          const std::vector<std::string>& verifKeysStr) const;
 
   /**
    * Creates a new IThresholdSigner for the specified signer ID with the specified secret key
@@ -80,7 +81,7 @@ class BlsThresholdFactory : public IThresholdFactory {
    *
    * @return an IThresholdSigner object that can be used to sign
    */
-  IThresholdSigner* newSigner(ShareID id, const char* secretKeyStr) const override;
+  virtual IThresholdSigner* newSigner(ShareID id, const char* secretKeyStr) const;
 
   /**
    * Creates random IThresholdSigner objects for *all* signer IDs from 1 to numSigners.
@@ -93,13 +94,9 @@ class BlsThresholdFactory : public IThresholdFactory {
    * @return a vector of IThresholdSigner's (indexed from 1 to reqSigners) and the IThresholdVerifier object
    *         (caller is responsible for deleting them)
    */
-  std::tuple<std::vector<IThresholdSigner*>, IThresholdVerifier*> newRandomSigners(
-      NumSharesType reqSigners, NumSharesType numSigners) const override;
-
-  /**
-   * Generates a single BLS key pair
-   */
-  std::pair<std::unique_ptr<IShareSecretKey>, std::unique_ptr<IShareVerificationKey>> newKeyPair() const override;
+  virtual std::tuple<std::vector<IThresholdSigner*>, IThresholdVerifier*> newRandomSigners(
+      NumSharesType reqSigners, NumSharesType numSigners) const;
 };
 
-}  // namespace BLS::Relic
+} /* namespace Relic */
+} /* namespace BLS */

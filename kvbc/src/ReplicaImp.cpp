@@ -24,8 +24,7 @@
 #include "bftengine/DbMetadataStorage.hpp"
 
 using bft::communication::ICommunication;
-using bftEngine::bcst::StateTransferDigest;
-using namespace concord::diagnostics;
+using bftEngine::SimpleBlockchainStateTransfer::StateTransferDigest;
 
 using concord::storage::DBMetadataStorage;
 
@@ -36,7 +35,7 @@ namespace concord::kvbc {
  * Starting.
  */
 Status ReplicaImp::start() {
-  LOG_INFO(logger, "ReplicaImp::Start() id = " << replicaConfig_.replicaId);
+  LOG_INFO(logger, "ReplicaImp::Start() id = " << m_replicaConfig.replicaId);
 
   if (m_currentRepStatus != RepStatus::Idle) {
     return Status::IllegalOperation("todo");
@@ -44,9 +43,10 @@ Status ReplicaImp::start() {
 
   m_currentRepStatus = RepStatus::Starting;
 
-  if (replicaConfig_.isReadOnly) {
+  if (m_replicaConfig.isReadOnly) {
     LOG_INFO(logger, "ReadOnly mode");
-    m_replicaPtr = bftEngine::IReplica::createNewRoReplica(replicaConfig_, m_stateTransfer, m_ptrComm);
+    m_replicaPtr =
+        bftEngine::IReplica::createNewRoReplica(&m_replicaConfig, m_stateTransfer, m_ptrComm, m_metadataStorage);
   } else {
     createReplicaAndSyncState();
   }
@@ -63,11 +63,9 @@ Status ReplicaImp::start() {
 
 void ReplicaImp::createReplicaAndSyncState() {
   bool isNewStorage = m_metadataStorage->isNewStorage();
-  bool erasedMetaData;
-  m_replicaPtr = bftEngine::IReplica::createNewReplica(
-      replicaConfig_, m_cmdHandler, m_stateTransfer, m_ptrComm, m_metadataStorage, erasedMetaData);
-  if (erasedMetaData) isNewStorage = true;
   LOG_INFO(logger, "createReplicaAndSyncState: isNewStorage= " << isNewStorage);
+  m_replicaPtr = bftEngine::IReplica::createNewReplica(
+      &m_replicaConfig, m_cmdHandler, m_stateTransfer, m_ptrComm, m_metadataStorage);
   if (!isNewStorage && !m_stateTransfer->isCollectingState()) {
     uint64_t removedBlocksNum = replicaStateSync_->execute(
         logger, *m_bcDbAdapter, getLastReachableBlockNum(), m_replicaPtr->getLastExecutedSequenceNum());
@@ -105,7 +103,6 @@ Status ReplicaImp::get(const Sliver &key, Sliver &outValue) const {
   // TODO(GG): check legality of operation (the method should be invoked from
   // the replica's internal thread)
 
-  TimeRecorder scoped_timer(*histograms_.get_value);
   BlockId dummy;
   return getInternal(getLastBlockNum(), key, outValue, dummy);
 }
@@ -114,7 +111,6 @@ Status ReplicaImp::get(BlockId readVersion, const Sliver &key, Sliver &outValue,
   // TODO(GG): check legality of operation (the method should be invoked from
   // the replica's internal thread)
 
-  TimeRecorder scoped_timer(*histograms_.get_block);
   return getInternal(readVersion, key, outValue, outBlock);
 }
 
@@ -123,11 +119,9 @@ Status ReplicaImp::getBlockData(BlockId blockId, SetOfKeyValuePairs &outBlockDat
   // the replica's internal thread)
 
   try {
-    TimeRecorder scoped_timer(*histograms_.get_block_data);
     Sliver block = getBlockInternal(blockId);
     outBlockData = m_bcDbAdapter->getBlockData(block);
   } catch (const NotFoundException &e) {
-    LOG_ERROR(logger, e.what());
     return Status::NotFound("todo");
   }
 
@@ -138,7 +132,6 @@ Status ReplicaImp::mayHaveConflictBetween(const Sliver &key, BlockId fromBlock, 
   // TODO(GG): add assert or print warning if fromBlock==0 (all keys have a
   // conflict in block 0)
 
-  TimeRecorder scoped_timer(*histograms_.may_have_conflict_between);
   // we conservatively assume that we have a conflict
   outRes = true;
 
@@ -161,7 +154,6 @@ Status ReplicaImp::addBlock(const SetOfKeyValuePairs &updates,
   // TODO(GG): what do we want to do with several identical keys in the same
   // block?
 
-  TimeRecorder scoped_timer(*histograms_.add_block);
   return addBlockInternal(updates, outBlockId);
 }
 
@@ -201,46 +193,18 @@ ReplicaImp::ReplicaImp(ICommunication *comm,
     : logger(logging::getLogger("skvbc.replicaImp")),
       m_currentRepStatus(RepStatus::Idle),
       m_ptrComm(comm),
-      replicaConfig_(replicaConfig),
+      m_replicaConfig(replicaConfig),
       aggregator_(aggregator) {
-  // Populate ST configuration
-  bftEngine::bcst::Config stConfig = {
-    replicaConfig_.replicaId,
-    replicaConfig_.fVal,
-    replicaConfig_.cVal,
-    (uint16_t)(replicaConfig_.numReplicas + replicaConfig_.numRoReplicas),
-    replicaConfig_.get("concord.bft.st.pedanticChecks", false),
-    replicaConfig_.isReadOnly,
-
-#if defined USE_COMM_PLAIN_TCP || defined USE_COMM_TLS_TCP
-    replicaConfig_.get<uint32_t>("concord.bft.st.maxChunkSize", 30 * 1024 * 1024),
-    replicaConfig_.get<uint16_t>("concord.bft.st.maxNumberOfChunksInBatch", 64),
-#else
-    replicaConfig_.get<uint32_t>("concord.bft.st.maxChunkSize", 2048),
-    replicaConfig_.get<uint16_t>("concord.bft.st.maxNumberOfChunksInBatch", 32),
-#endif
-    replicaConfig_.get<uint32_t>("concord.bft.st.maxBlockSize", 30 * 1024 * 1024),
-    replicaConfig_.get<uint32_t>("concord.bft.st.maxPendingDataFromSourceReplica", 256 * 1024 * 1024),
-    replicaConfig_.getmaxNumOfReservedPages(),
-    replicaConfig_.getsizeOfReservedPage(),
-    replicaConfig_.get<uint32_t>("concord.bft.st.refreshTimerMs", 300),
-    replicaConfig_.get<uint32_t>("concord.bft.st.checkpointSummariesRetransmissionTimeoutMs", 2500),
-    replicaConfig_.get<uint32_t>("concord.bft.st.maxAcceptableMsgDelayMs", 60000),
-    replicaConfig_.get<uint32_t>("concord.bft.st.sourceReplicaReplacementTimeoutMs", 15000),
-    replicaConfig_.get<uint32_t>("concord.bft.st.fetchRetransmissionTimeoutMs", 250),
-    replicaConfig_.get<uint32_t>("concord.bft.st.metricsDumpIntervalSec", 5),
-    replicaConfig_.get("concord.bft.st.runInSeparateThread", replicaConfig_.isReadOnly),
-    replicaConfig_.get("concord.bft.st.enableReservedPages", !replicaConfig_.isReadOnly)
-  };
-
-#if !defined USE_COMM_PLAIN_TCP && !defined USE_COMM_TLS_TCP
-  // maxChunkSize * maxNumberOfChunksInBatch shouldn't exceed UDP message size which is limited to 64KB
-  if (stConfig.maxChunkSize * stConfig.maxNumberOfChunksInBatch > 64 * 1024) {
-    LOG_WARN(logger, "overriding incorrect chunking configuration for UDP");
-    stConfig.maxChunkSize = 2048;
-    stConfig.maxNumberOfChunksInBatch = 32;
-  }
-#endif
+  bftEngine::SimpleBlockchainStateTransfer::Config state_transfer_config;
+  state_transfer_config.myReplicaId = m_replicaConfig.replicaId;
+  state_transfer_config.cVal = m_replicaConfig.cVal;
+  state_transfer_config.fVal = m_replicaConfig.fVal;
+  state_transfer_config.numReplicas = m_replicaConfig.numReplicas + m_replicaConfig.numRoReplicas;
+  state_transfer_config.metricsDumpIntervalSeconds = std::chrono::seconds(m_replicaConfig.metricsDumpIntervalSeconds);
+  state_transfer_config.isReadOnly = replicaConfig.isReadOnly;
+  if (replicaConfig.maxNumOfReservedPages > 0)
+    state_transfer_config.maxNumOfReservedPages = replicaConfig.maxNumOfReservedPages;
+  if (replicaConfig.sizeOfReservedPage > 0) state_transfer_config.sizeOfReservedPage = replicaConfig.sizeOfReservedPage;
 
   auto dbSet = storageFactory->newDatabaseSet();
   m_bcDbAdapter = std::move(dbSet.dbAdapter);
@@ -248,11 +212,12 @@ ReplicaImp::ReplicaImp(ICommunication *comm,
   dbSet.metadataDBClient->setAggregator(aggregator);
   m_metadataDBClient = dbSet.metadataDBClient;
   auto stKeyManipulator = std::shared_ptr<storage::ISTKeyManipulator>{storageFactory->newSTKeyManipulator()};
-  m_stateTransfer = bftEngine::bcst::create(stConfig, this, m_metadataDBClient, stKeyManipulator, aggregator_);
+  m_stateTransfer = bftEngine::SimpleBlockchainStateTransfer::create(
+      state_transfer_config, this, m_metadataDBClient, stKeyManipulator, aggregator_);
   m_metadataStorage = new DBMetadataStorage(m_metadataDBClient.get(), storageFactory->newMetadataKeyManipulator());
 
   controlStateManager_ =
-      std::make_shared<bftEngine::ControlStateManager>(m_stateTransfer, replicaConfig_.getsizeOfReservedPage());
+      std::make_shared<bftEngine::ControlStateManager>(m_stateTransfer, m_replicaConfig.sizeOfReservedPage);
 }
 
 ReplicaImp::~ReplicaImp() {
@@ -319,22 +284,20 @@ bool ReplicaImp::putBlock(const uint64_t blockId, const char *block_data, const 
   return true;
 }
 
-RawBlock ReplicaImp::getBlockInternal(BlockId blockId) const { return m_bcDbAdapter->getRawBlock(blockId); }
+RawBlock ReplicaImp::getBlockInternal(BlockId blockId) const {
+  ConcordAssert(blockId <= getLastBlockNum());
+  return m_bcDbAdapter->getRawBlock(blockId);
+}
 
 /*
  * This method assumes that *outBlock is big enough to hold block content
  * The caller is the owner of the memory
  */
 bool ReplicaImp::getBlock(uint64_t blockId, char *outBlock, uint32_t *outBlockSize) {
-  try {
-    RawBlock block = getBlockInternal(blockId);
-    *outBlockSize = block.length();
-    memcpy(outBlock, block.data(), block.length());
-    return true;
-  } catch (const NotFoundException &e) {
-    LOG_FATAL(logger, e.what());
-    throw;
-  }
+  RawBlock block = getBlockInternal(blockId);
+  *outBlockSize = block.length();
+  memcpy(outBlock, block.data(), block.length());
+  return true;
 }
 
 bool ReplicaImp::hasBlock(BlockId blockId) const { return m_bcDbAdapter->hasBlock(blockId); }
@@ -350,7 +313,7 @@ bool ReplicaImp::getPrevDigestFromBlock(BlockId blockId, StateTransferDigest *ou
     memcpy(outPrevBlockDigest, parentDigest.data(), BLOCK_DIGEST_SIZE);
     return true;
   } catch (const NotFoundException &e) {
-    LOG_FATAL(logger, "Block not found for parent digest, ID: " << blockId << " " << e.what());
+    LOG_FATAL(logger, "Block not found for parent digest, ID: " << blockId);
     throw;
   }
 }

@@ -15,17 +15,15 @@
 
 #include <map>
 #include <set>
-#include <functional>
 
 #include "DataStore.hpp"
 #include "STDigest.hpp"
 #include "Logger.hpp"
-#include "kvstream.h"
 
 using std::map;
 
 namespace bftEngine {
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 namespace impl {
 
 class InMemoryDataStore : public DataStore {
@@ -141,7 +139,6 @@ class InMemoryDataStore : public DataStore {
     // only be one transaction at a time.
     return new DataStoreTransaction(this->shared_from_this(), new NullTransaction());
   }
-  void setEraseDataStoreFlag() override {}
 
  protected:
   const uint32_t sizeOfReservedPage_;
@@ -181,7 +178,7 @@ class InMemoryDataStore : public DataStore {
       if (pageId != rhs.pageId)
         return pageId < rhs.pageId;
       else
-        return checkpoint > rhs.checkpoint;
+        return rhs.checkpoint < checkpoint;
     }
   };
 
@@ -192,13 +189,6 @@ class InMemoryDataStore : public DataStore {
 
   map<ResPageKey, ResPageVal> pages;
 
-  std::string getPagesForLog() {
-    std::ostringstream oss;
-    oss << "reserved pages: ";
-    for (const auto& it : pages) oss << "[" << it.first.pageId << ":" << it.first.checkpoint << "]";
-    return oss.str();
-  }
-
   friend class DBDataStore;
   const uint32_t getSizeOfReservedPage() const { return sizeOfReservedPage_; }
   const map<uint64_t, CheckpointDesc>& getDescMap() const { return descMap; }
@@ -207,11 +197,11 @@ class InMemoryDataStore : public DataStore {
 
   void setInitialized(bool init) { wasInit_ = init; }
   logging::Logger& logger() {
-    static logging::Logger logger_ = logging::getLogger("concord.bft.st.inmem");
+    static logging::Logger logger_ = logging::getLogger("bft.st.inmem");
     return logger_;
   }
 };
 
 }  // namespace impl
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 }  // namespace bftEngine

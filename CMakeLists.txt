@@ -9,6 +9,11 @@ project(concord-bft VERSION 0.1.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+if(DEFINED LEAKCHECK)
+    set(LEAKCHECK TRUE)
+else()
+    set(LEAKCHECK FALSE)
+endif()
 set(SLEEP_FOR_DBG FALSE)
 
 set(MIN_BOOST_VERSION 1.64)
@@ -24,23 +29,14 @@ if (NOT DEFINED USE_LOG4CPP)
   option(USE_LOG4CPP "Enable LOG4CPP" FALSE)
 endif()
 
-# Default KEEP_APOLLO_LOGS to TRUE
-option(KEEP_APOLLO_LOGS "Retains logs from replicas in separate folder for each test in build/tests/apollo/logs " TRUE)
-
 # Default BUILD_COMM_TCP_PLAIN to FALSE
 option(BUILD_COMM_TCP_PLAIN "Enable TCP communication" FALSE)
-
-# Default LEAKCHECK to FALSE
-option(LEAKCHECK "Enable Address and Leak Sanitizers" FALSE)
 
 # Default BUILD_COMM_TCP_TLS to FALSE
 option(BUILD_COMM_TCP_TLS "Enable TCP TLS communication" FALSE)
 
 # This requires the rocksdb dependencies to be installed, so defaults to FALSE
 option(BUILD_ROCKSDB_STORAGE "Enable building of RocksDB storage library" FALSE)
-
-# Build S3 Object Store support.
-option(USE_S3_OBJECT_STORE "Enable S3 Object Store" FALSE)
 
 set(COMM_MODULES 0)
 if(BUILD_COMM_TCP_PLAIN)
@@ -133,5 +129,4 @@ option(OMIT_TEST_OUTPUT "Forwards output stdout and stdin to /dev/null" OFF)
 if(BUILD_TESTING)
     add_subdirectory(bftengine/tests)
     add_subdirectory(tests)
-    add_subdirectory(messages)
 endif()

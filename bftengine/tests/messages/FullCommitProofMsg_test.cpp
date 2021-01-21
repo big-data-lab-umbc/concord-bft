@@ -20,7 +20,8 @@ using namespace bftEngine;
 using namespace bftEngine::impl;
 
 TEST(FullCommitProofMsg, base_methods) {
-  ReplicasInfo replicaInfo(createReplicaConfig(), false, false);
+  auto config = createReplicaConfig();
+  ReplicasInfo replicaInfo(config, false, false);
   ReplicaId senderId = 1u;
   ViewNum viewNum = 2u;
   SeqNum seqNum = 3u;
@@ -32,7 +33,7 @@ TEST(FullCommitProofMsg, base_methods) {
                          seqNum,
                          commit_proof_signature.data(),
                          static_cast<uint16_t>(commit_proof_signature.size()),
-                         concordUtils::SpanContext{spanContext}};
+                         spanContext};
   EXPECT_EQ(msg.viewNumber(), viewNum);
   EXPECT_EQ(msg.seqNumber(), seqNum);
   EXPECT_EQ(commit_proof_signature, std::string(msg.thresholSignature(), msg.thresholSignatureLength()));

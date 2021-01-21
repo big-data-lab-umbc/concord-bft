@@ -23,7 +23,6 @@
 #include "messages/ViewChangeMsg.hpp"
 #include "messages/NewViewMsg.hpp"
 #include "messages/SignedShareMsgs.hpp"
-#include "CryptoManager.hpp"
 
 namespace bftEngine {
 namespace impl {
@@ -46,7 +45,7 @@ uint32_t ViewsManager::PrevViewInfo::maxSize() {
 
 ViewsManager::ViewsManager(const ReplicasInfo* const r,
                            SigManager* sigmgr,
-                           std::shared_ptr<IThresholdVerifier> preparedCertificateVerifier)
+                           IThresholdVerifier* const preparedCertificateVerifier)
     : replicasInfo(r), N(r->numberOfReplicas()), F(r->fVal()), C(r->cVal()), myId(r->myId()) {
   sigManager_ = sigmgr;
   ConcordAssert(preparedCertificateVerifier != nullptr);
@@ -117,7 +116,7 @@ ViewsManager::~ViewsManager() {
 
 ViewsManager* ViewsManager::createOutsideView(const ReplicasInfo* const r,
                                               SigManager* sigMgr,
-                                              std::shared_ptr<IThresholdVerifier> preparedCertificateVerifier,
+                                              IThresholdVerifier* const preparedCertificateVerifier,
                                               ViewNum lastActiveView,
                                               SeqNum lastStable,
                                               SeqNum lastExecuted,
@@ -177,14 +176,14 @@ ViewsManager* ViewsManager::createOutsideView(const ReplicasInfo* const r,
 
 ViewsManager* ViewsManager::createInsideViewZero(const ReplicasInfo* const r,
                                                  SigManager* sigMgr,
-                                                 std::shared_ptr<IThresholdVerifier> preparedCertificateVerifier) {
+                                                 IThresholdVerifier* const preparedCertificateVerifier) {
   ViewsManager* v = new ViewsManager(r, sigMgr, preparedCertificateVerifier);
   return v;
 }
 
 ViewsManager* ViewsManager::createInsideView(const ReplicasInfo* const r,
                                              SigManager* sigMgr,
-                                             std::shared_ptr<IThresholdVerifier> preparedCertificateVerifier,
+                                             IThresholdVerifier* const preparedCertificateVerifier,
                                              ViewNum view,
                                              SeqNum stableLowerBound,
                                              NewViewMsg* newViewMsg,
@@ -686,7 +685,6 @@ bool ViewsManager::tryToEnterView(ViewNum v,
   // enter to view v
   ///////////////////////////////////////////////////////////////////////////
 
-  LOG_INFO(VC_LOG, "View is activated " << v << "previous view was " << myLatestActiveView);
   myLatestActiveView = v;
   stat = Stat::IN_VIEW;
 
@@ -890,8 +888,7 @@ void ViewsManager::computeRestrictionsOfNewView(ViewNum v) {
       // Outputs
       minRestrictionOfPendingView,
       maxRestrictionOfPendingView,
-      restrictionsOfPendingView,
-      CryptoManager::instance().thresholdVerifierForSlowPathCommit());
+      restrictionsOfPendingView);
 
   // add items to prePrepareMsgsOfRestrictions
   // if we have restrictions

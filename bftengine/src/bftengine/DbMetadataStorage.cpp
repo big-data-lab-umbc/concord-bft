@@ -146,19 +146,6 @@ Status DBMetadataStorage::multiDel(const ObjectIdsVector &objectIds) {
   }
   return dbClient_->multiDel(keysVec);
 }
-void DBMetadataStorage::eraseData() { cleanDB(); }
-void DBMetadataStorage::cleanDB() {
-  try {
-    ObjectIdsVector objectIds = {objectsNumParameterId_};
-    for (const auto &id : objectIdToSizeMap_) {
-      objectIds.push_back(id.first);
-    }
-    multiDel(objectIds);
-  } catch (std::exception &e) {
-    LOG_FATAL(logger_, e.what());
-    std::terminate();
-  }
-}
 
 }  // namespace storage
 }  // namespace concord

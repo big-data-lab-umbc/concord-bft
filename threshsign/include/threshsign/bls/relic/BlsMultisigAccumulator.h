@@ -38,6 +38,11 @@ class BlsMultisigAccumulator : public BlsAccumulatorBase {
  public:
   virtual void getFullSignedData(char* outThreshSig, int threshSigLen);
 
+  virtual IThresholdAccumulator* clone() {
+    // Call copy constructor.
+    return new BlsMultisigAccumulator(*this);
+  }
+
   virtual bool hasShareVerificationEnabled() const { return shareVerificationEnabled; }
 
   // Used internally or for testing

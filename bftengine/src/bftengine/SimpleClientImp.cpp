@@ -16,7 +16,6 @@
 #include <condition_variable>
 
 #include "ClientMsgs.hpp"
-#include "OpenTracing.hpp"
 #include "SimpleClient.hpp"
 #include "assertUtils.hpp"
 #include "TimeUtils.hpp"
@@ -244,12 +243,12 @@ OperationResult SimpleClientImp::sendRequest(uint8_t flags,
   const Time beginTime = getMonotonicTime();
 
   ClientRequestMsg* reqMsg;
-  concordUtils::SpanContext ctx{span_context};
   if (isPreProcessRequired)
     reqMsg = new preprocessor::ClientPreProcessRequestMsg(
-        clientId_, reqSeqNum, lengthOfRequest, request, timeoutMilli, msgCid, ctx);
+        clientId_, reqSeqNum, lengthOfRequest, request, timeoutMilli, msgCid, span_context);
   else
-    reqMsg = new ClientRequestMsg(clientId_, flags, reqSeqNum, lengthOfRequest, request, timeoutMilli, msgCid, ctx);
+    reqMsg =
+        new ClientRequestMsg(clientId_, flags, reqSeqNum, lengthOfRequest, request, timeoutMilli, msgCid, span_context);
   pendingRequest_ = reqMsg;
 
   sendPendingRequest();
@@ -507,9 +506,8 @@ SimpleClient* SimpleClient::createSimpleClient(ICommunication* communication,
 
 SimpleClient::~SimpleClient() = default;
 
-std::unique_ptr<SeqNumberGeneratorForClientRequests>
-SeqNumberGeneratorForClientRequests::createSeqNumberGeneratorForClientRequests() {
-  return std::make_unique<impl::SeqNumberGeneratorForClientRequestsImp>();
+SeqNumberGeneratorForClientRequests* SeqNumberGeneratorForClientRequests::createSeqNumberGeneratorForClientRequests() {
+  return new impl::SeqNumberGeneratorForClientRequestsImp();
 }
 
 }  // namespace bftEngine

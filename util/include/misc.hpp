@@ -15,7 +15,7 @@
 
 #include <chrono>
 
-inline uint64_t get_monotonic_time() {
+uint64_t get_monotonic_time() {
   std::chrono::steady_clock::time_point curTimePoint = std::chrono::steady_clock::now();
 
   auto timeSinceEpoch = curTimePoint.time_since_epoch();

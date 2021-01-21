@@ -34,7 +34,6 @@ namespace bft::client {
 // (2) A mechanism to retrieve the last used sequence number from the replicas on restart. No such
 //     mechanism is cucrrently implemented, buf if necessary we will add it.
 class SeqNumberGenerator {
- public:
   SeqNumberGenerator(ClientId client_id) : client_id_(client_id) {}
 
   uint64_t unique() {
@@ -50,7 +49,7 @@ class SeqNumberGenerator {
       lastCountOfUniqueFetchID_ = 0;
     } else {
       if (lastCountOfUniqueFetchID_ == LAST_COUNT_LIMIT) {
-        LOG_WARN(logger_, "Client SeqNum Counter reached max value. " << KVLOG(client_id_.val));
+        LOG_WARN(logger_, "Client SeqNum Counter reached max value. " << KVLOG(client_id_));
         lastMilliOfUniqueFetchID_++;
         lastCountOfUniqueFetchID_ = 0;
       } else {

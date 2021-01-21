@@ -25,8 +25,6 @@
 #include "bftengine/DbMetadataStorage.hpp"
 #include "storage_factory_interface.h"
 #include "ControlStateManager.hpp"
-#include "diagnostics.h"
-#include "performance_handler.h"
 
 namespace concord::kvbc {
 
@@ -34,7 +32,7 @@ class ReplicaImp : public IReplica,
                    public ILocalKeyValueStorageReadOnly,
                    public IBlocksAppender,
                    public IBlocksDeleter,
-                   public bftEngine::bcst::IAppState {
+                   public bftEngine::SimpleBlockchainStateTransfer::IAppState {
  public:
   /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   // IReplica implementation
@@ -71,7 +69,8 @@ class ReplicaImp : public IReplica,
   // IAppState implementation
   bool hasBlock(BlockId blockId) const override;
   bool getBlock(uint64_t blockId, char *outBlock, uint32_t *outBlockSize) override;
-  bool getPrevDigestFromBlock(uint64_t blockId, bftEngine::bcst::StateTransferDigest *) override;
+  bool getPrevDigestFromBlock(uint64_t blockId,
+                              bftEngine::SimpleBlockchainStateTransfer::StateTransferDigest *) override;
   bool putBlock(const uint64_t blockId, const char *block, const uint32_t blockSize) override;
   uint64_t getLastReachableBlockNum() const override { return m_bcDbAdapter->getLastReachableBlockId(); }
   uint64_t getLastBlockNum() const override { return m_bcDbAdapter->getLatestBlockId(); }
@@ -107,7 +106,7 @@ class ReplicaImp : public IReplica,
     const Sliver key;
     const BlockId blockId;
 
-    KeyIDPair(const Sliver &s, BlockId i) : key(s), blockId(i) {}
+    KeyIDPair(Sliver s, BlockId i) : key(s), blockId(i) {}
 
     bool operator<(const KeyIDPair &k) const {
       int c = this->key.compare(k.key);
@@ -133,7 +132,7 @@ class ReplicaImp : public IReplica,
   std::unique_ptr<IDbAdapter> m_bcDbAdapter;
   std::shared_ptr<storage::IDBClient> m_metadataDBClient;
   bft::communication::ICommunication *m_ptrComm = nullptr;
-  const bftEngine::ReplicaConfig &replicaConfig_;
+  bftEngine::ReplicaConfig m_replicaConfig;
   bftEngine::IReplica::IReplicaPtr m_replicaPtr = nullptr;
   ICommandsHandler *m_cmdHandler = nullptr;
   bftEngine::IStateTransfer *m_stateTransfer = nullptr;
@@ -141,27 +140,6 @@ class ReplicaImp : public IReplica,
   std::unique_ptr<ReplicaStateSync> replicaStateSync_;
   std::shared_ptr<concordMetrics::Aggregator> aggregator_;
   std::shared_ptr<bftEngine::ControlStateManager> controlStateManager_;
-
-  // 5 Minutes
-  static constexpr int64_t MAX_VALUE_MICROSECONDS = 1000 * 1000 * 60 * 5;
-  // 1 second
-  static constexpr int64_t MAX_VALUE_NANOSECONDS = 1000 * 1000 * 1000;
-  using Recorder = concord::diagnostics::Recorder;
-  struct Recorders {
-    Recorders() {
-      auto &registrar = concord::diagnostics::RegistrarSingleton::getInstance();
-      registrar.perf.registerComponent("kvbc",
-                                       {get_value, get_block, get_block_data, may_have_conflict_between, add_block});
-    }
-    DEFINE_SHARED_RECORDER(get_value, 1, MAX_VALUE_MICROSECONDS, 3, concord::diagnostics::Unit::MICROSECONDS);
-    DEFINE_SHARED_RECORDER(get_block, 1, MAX_VALUE_MICROSECONDS, 3, concord::diagnostics::Unit::MICROSECONDS);
-    DEFINE_SHARED_RECORDER(get_block_data, 1, MAX_VALUE_MICROSECONDS, 3, concord::diagnostics::Unit::MICROSECONDS);
-    DEFINE_SHARED_RECORDER(
-        may_have_conflict_between, 1, MAX_VALUE_NANOSECONDS, 3, concord::diagnostics::Unit::NANOSECONDS);
-    DEFINE_SHARED_RECORDER(add_block, 1, MAX_VALUE_MICROSECONDS, 3, concord::diagnostics::Unit::MICROSECONDS);
-  };
-
-  Recorders histograms_;
-};  // namespace concord::kvbc
+};
 
 }  // namespace concord::kvbc

@@ -25,7 +25,7 @@ BlsMultisigKeygen::BlsMultisigKeygen(const BlsPublicParameters& params, NumShare
   const BNT& fieldOrder = params.getGroupOrder();
 
   for (ShareID i = 1; i <= n; i++) {
-    size_t idx = static_cast<size_t>(i);
+    size_t idx = static_cast<size_t>(i);  // thanks, C++!
     BNT& skShare = skShares[idx];
     G2T& pkShare = pkShares[idx];
 
@@ -38,7 +38,7 @@ BlsMultisigKeygen::BlsMultisigKeygen(const BlsPublicParameters& params, NumShare
 
   g2_mul_gen(pk, sk);
 
-  LOG_DEBUG(BLS_LOG, "Created: " << this);
+  LOG_TRACE(BLS_LOG, "Created: " << this);
 }
 
 BlsMultisigKeygen::~BlsMultisigKeygen() { LOG_TRACE(BLS_LOG, "Destroyed: " << this); }

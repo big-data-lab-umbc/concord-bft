@@ -68,7 +68,7 @@ struct Node {
        const BlockDigest &pParentDigest,
        const sparse_merkle::Hash &pStateHash,
        const sparse_merkle::Version &pStateRootVersion,
-       const Keys &pKeys = Keys{})
+       Keys pKeys = Keys{})
       : blockId{pBlockId},
         parentDigest{pParentDigest},
         stateHash{pStateHash},

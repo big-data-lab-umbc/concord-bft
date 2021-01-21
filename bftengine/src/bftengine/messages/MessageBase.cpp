@@ -14,7 +14,6 @@
 #include "MessageBase.hpp"
 #include "assertUtils.hpp"
 #include "ReplicaConfig.hpp"
-#include "Logger.hpp"
 
 #ifdef DEBUG_MEMORY_MSG
 #include <set>
@@ -65,23 +64,6 @@ void MessageBase::shrinkToFit() {
   storageSize_ = msgSize_;
 }
 
-bool MessageBase::reallocSize(uint32_t size) {
-  ConcordAssert(owner_);
-  ConcordAssert(size >= msgSize_);
-
-  void *p = (void *)msgBody_;
-  p = std::realloc(p, size);
-
-  if (p == nullptr) {
-    return false;
-  } else {
-    msgBody_ = (MessageBase::Header *)p;
-    storageSize_ = size;
-    msgSize_ = size;
-    return true;
-  }
-}
-
 MessageBase::MessageBase(NodeIdType sender) {
   storageSize_ = 0;
   msgBody_ = nullptr;
@@ -123,10 +105,6 @@ MessageBase::MessageBase(NodeIdType sender, MessageBase::Header *body, MsgSize s
 #ifdef DEBUG_MEMORY_MSG
   liveMessagesDebug.insert(this);
 #endif
-}
-
-void MessageBase::validate(const ReplicasInfo &) const {
-  LOG_DEBUG(GL, "Calling MessageBase::validate on a message of type " << type());
 }
 
 void MessageBase::setMsgSize(MsgSize size) {
@@ -187,7 +165,7 @@ MessageBase *MessageBase::createObjAndMsgFromLocalBuffer(char *buffer, size_t bu
   RawHeaderOfObjAndMsg *pHeader = (RawHeaderOfObjAndMsg *)buffer;
   if (pHeader->magicNum != magicNumOfRawFormat) return nullptr;
   if (pHeader->msgSize == 0) return nullptr;
-  if (pHeader->msgSize > ReplicaConfig::instance().getmaxExternalMessageSize()) return nullptr;
+  if (pHeader->msgSize > ReplicaConfigSingleton::GetInstance().GetMaxExternalMessageSize()) return nullptr;
   if (pHeader->msgSize + sizeof(RawHeaderOfObjAndMsg) > bufferLength) return nullptr;
 
   char *pBodyInBuffer = buffer + sizeof(RawHeaderOfObjAndMsg);

@@ -13,7 +13,6 @@
 
 #pragma once
 
-#include <atomic>
 #include <stdint.h>
 #include <map>
 #include <vector>
@@ -21,23 +20,15 @@
 #include <memory>
 #include <list>
 #include <variant>
-#include "Statistics.hpp"
 
 namespace concordMetrics {
-template <class T>
-class BasicGauge;
-template <class T>
-class BasicCounter;
-
-using Gauge = BasicGauge<uint64_t>;
-using Counter = BasicCounter<uint64_t>;
-using AtomicGauge = BasicGauge<std::atomic_uint64_t>;
-using AtomicCounter = BasicCounter<std::atomic_uint64_t>;
 
 // Forward declarations since Aggregator requires these types.
 class Component;
 class Values;
+class Gauge;
 class Status;
+class Counter;
 typedef struct metric_ Metric;
 
 // An aggregator maintains metrics for multiple components. Components
@@ -57,7 +48,7 @@ class Aggregator {
   std::list<Metric> CollectGauges();
   std::list<Metric> CollectCounters();
   std::list<Metric> CollectStatuses();
-  std::list<Metric> CollectSummaries();
+
   // Generate a JSON formatted string
   std::string ToJson();
 
@@ -73,41 +64,15 @@ class Aggregator {
 
 // A Gauge is a an integer value that shows the current value of something. It
 // can only be varied by directly setting and getting it.
-template <class T>
-class BasicGauge {
+class Gauge {
  public:
-  explicit BasicGauge(const uint64_t val) : val_(val) {}
-  BasicGauge(const BasicGauge& gauge) { val_ = (unsigned long)gauge.val_; }
-  BasicGauge& operator=(const BasicGauge& gauge) {
-    val_ = (unsigned long)gauge.val_;
-    return *this;
-  }
-  void Inc() { ++val_; }
-  void Dec() { --val_; }
+  explicit Gauge(const uint64_t val) : val_(val) {}
+
   void Set(const uint64_t val) { val_ = val; }
   uint64_t Get() { return val_; }
 
  private:
-  T val_;
-};
-
-template <class T>
-class BasicCounter {
- public:
-  explicit BasicCounter(const uint64_t val) : val_(val) {}
-  BasicCounter(const BasicCounter& counter) { val_ = (uint64_t)counter.val_; }
-  BasicCounter& operator=(const BasicCounter& counter) {
-    val_ = (uint64_t)counter.val_;
-    return *this;
-  }
-  uint64_t Inc(uint64_t val = 1) {
-    val_ += val;
-    return val_;
-  }
-  uint64_t Get() { return val_; }
-
- private:
-  T val_;
+  uint64_t val_;
 };
 
 // Status is a text based representation of a value. It's used for things that
@@ -124,13 +89,25 @@ class Status {
   std::string val_;
 };
 
+class Counter {
+ public:
+  explicit Counter(const uint64_t val) : val_(val) {}
+
+  // Increment the counter and return the value after incrementing.
+  uint64_t Inc(uint64_t val = 1) { return val_ += val; }
+  uint64_t Get() { return val_; }
+
+ private:
+  uint64_t val_;
+};
+
 // A generic struct that may represent a counter or a gauge
 // the motivation is to eliminate that need to know the exact
 // metric name before getting it from the aggregator
 struct metric_ {
   std::string component;
   std::string name;
-  std::variant<Counter, Gauge, Status, SummaryDescription> value;
+  std::variant<Counter, Gauge, Status> value;
 };
 
 class Values {
@@ -138,8 +115,6 @@ class Values {
   std::vector<Gauge> gauges_;
   std::vector<Status> statuses_;
   std::vector<Counter> counters_;
-  std::vector<AtomicCounter> atomic_counters_;
-  std::vector<AtomicGauge> atomic_gauges_;
 
   friend class Component;
   friend class Aggregator;
@@ -154,8 +129,6 @@ class Names {
   std::vector<std::string> gauge_names_;
   std::vector<std::string> status_names_;
   std::vector<std::string> counter_names_;
-  std::vector<std::string> atomic_counter_names_;
-  std::vector<std::string> atomic_gauge_names_;
 
   friend class Component;
   friend class Aggregator;
@@ -195,10 +168,6 @@ class Component {
   Handle<Status> RegisterStatus(const std::string& name, const std::string& val);
   Handle<Counter> RegisterCounter(const std::string& name, const uint64_t val);
   Handle<Counter> RegisterCounter(const std::string& name) { return RegisterCounter(name, 0); }
-  Handle<AtomicCounter> RegisterAtomicCounter(const std::string& name, const uint64_t val);
-  Handle<AtomicCounter> RegisterAtomicCounter(const std::string& name) { return RegisterAtomicCounter(name, 0); }
-  Handle<AtomicGauge> RegisterAtomicGauge(const std::string& name, const uint64_t val);
-
   std::list<Metric> CollectGauges();
   std::list<Metric> CollectCounters();
   std::list<Metric> CollectStatuses();
@@ -247,7 +216,5 @@ class Component {
 typedef concordMetrics::Component::Handle<concordMetrics::Gauge> GaugeHandle;
 typedef concordMetrics::Component::Handle<concordMetrics::Status> StatusHandle;
 typedef concordMetrics::Component::Handle<concordMetrics::Counter> CounterHandle;
-typedef concordMetrics::Component::Handle<concordMetrics::AtomicCounter> AtomicCounterHandle;
-typedef concordMetrics::Component::Handle<concordMetrics::AtomicGauge> AtomicGaugeHandle;
 
 }  // namespace concordMetrics

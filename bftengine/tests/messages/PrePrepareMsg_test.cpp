@@ -12,7 +12,6 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
-#include "OpenTracing.hpp"
 #include "gtest/gtest.h"
 #include "messages/PrePrepareMsg.hpp"
 #include "messages/ClientRequestMsg.hpp"
@@ -24,6 +23,14 @@
 using namespace bftEngine;
 using namespace bftEngine::impl;
 
+ReplicaConfig create_replica_config() {
+  ReplicaConfig config;
+  config.maxExternalMessageSize = 2048;
+  config.fVal = 1;
+  config.numReplicas = 4;
+  return config;
+}
+
 ClientRequestMsg create_client_request() {
   uint64_t reqSeqNum = 100u;
   const char request[] = {"request body"};
@@ -32,18 +39,15 @@ ClientRequestMsg create_client_request() {
   const char rawSpanContext[] = {"span_\0context"};
   const std::string spanContext{rawSpanContext, sizeof(rawSpanContext)};
 
-  return ClientRequestMsg(1u,
-                          'F',
-                          reqSeqNum,
-                          sizeof(request),
-                          request,
-                          requestTimeoutMilli,
-                          correlationId,
-                          concordUtils::SpanContext{spanContext});
+  return ClientRequestMsg(
+      1u, 'F', reqSeqNum, sizeof(request), request, requestTimeoutMilli, correlationId, spanContext);
 }
 
 TEST(PrePrepareMsg, create_and_compare) {
-  ReplicasInfo replicaInfo(createReplicaConfig(), false, false);
+  auto config = createReplicaConfig();
+  config.singletonFromThis();
+
+  ReplicasInfo replicaInfo(config, false, false);
 
   ReplicaId senderId = 1u;
   ViewNum viewNum = 2u;
@@ -52,8 +56,7 @@ TEST(PrePrepareMsg, create_and_compare) {
   const char rawSpanContext[] = {"span_\0context"};
   const std::string spanContext{rawSpanContext, sizeof(rawSpanContext)};
   ClientRequestMsg client_request = create_client_request();
-  PrePrepareMsg msg(
-      senderId, viewNum, seqNum, commitPath, concordUtils::SpanContext{spanContext}, client_request.size() * 2);
+  PrePrepareMsg msg(senderId, viewNum, seqNum, commitPath, spanContext, client_request.size() * 2);
   EXPECT_EQ(msg.viewNumber(), viewNum);
   EXPECT_EQ(msg.seqNumber(), seqNum);
   EXPECT_EQ(msg.firstPath(), commitPath);
@@ -78,6 +81,7 @@ TEST(PrePrepareMsg, create_and_compare) {
     EXPECT_EQ(memcmp(msg.body(), client_request.body(), msg.size()), 0);
   }
   iterator.restart();
+  destroyReplicaConfig(config);
 }
 
 TEST(PrePrepareMsg, create_null_message) {
@@ -87,8 +91,7 @@ TEST(PrePrepareMsg, create_null_message) {
   CommitPath commitPath = CommitPath::OPTIMISTIC_FAST;
   const char rawSpanContext[] = {"span_\0context"};
   const std::string spanContext{rawSpanContext, sizeof(rawSpanContext)};
-  auto null_msg =
-      std::make_unique<PrePrepareMsg>(senderId, viewNum, seqNum, commitPath, concordUtils::SpanContext{spanContext}, 0);
+  auto null_msg = std::make_unique<PrePrepareMsg>(senderId, viewNum, seqNum, commitPath, spanContext, 0);
 
   auto& msg = *null_msg;
   EXPECT_EQ(msg.viewNumber(), viewNum);
@@ -99,7 +102,10 @@ TEST(PrePrepareMsg, create_null_message) {
 }
 
 TEST(PrePrepareMsg, base_methods) {
-  ReplicasInfo replicaInfo(createReplicaConfig(), false, false);
+  auto config = createReplicaConfig();
+  config.singletonFromThis();
+
+  ReplicasInfo replicaInfo(config, false, false);
   ReplicaId senderId = 1u;
   ViewNum viewNum = 2u;
   SeqNum seqNum = 3u;
@@ -107,12 +113,12 @@ TEST(PrePrepareMsg, base_methods) {
   const char rawSpanContext[] = {"span_\0context"};
   const std::string spanContext{rawSpanContext, sizeof(rawSpanContext)};
   ClientRequestMsg client_request = create_client_request();
-  PrePrepareMsg msg(
-      senderId, viewNum, seqNum, commitPath, concordUtils::SpanContext{spanContext}, client_request.size());
+  PrePrepareMsg msg(senderId, viewNum, seqNum, commitPath, spanContext, client_request.size());
   msg.addRequest(client_request.body(), client_request.size());
   msg.finishAddingRequests();
   EXPECT_NO_THROW(msg.validate(replicaInfo));
   testMessageBaseMethods(msg, MsgCode::PrePrepare, senderId, spanContext);
+  destroyReplicaConfig(config);
 }
 
 int main(int argc, char** argv) {

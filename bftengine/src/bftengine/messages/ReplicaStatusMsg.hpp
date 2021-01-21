@@ -11,7 +11,6 @@
 
 #pragma once
 #include "MessageBase.hpp"
-#include "OpenTracing.hpp"
 
 namespace bftEngine {
 namespace impl {
@@ -26,9 +25,7 @@ class ReplicaStatusMsg : public MessageBase {
                    bool listOfPrePrepareMsgsInActiveWindow,
                    bool listOfMissingViewChangeMsgForViewChange,
                    bool listOfMissingPrePrepareMsgForViewChange,
-                   const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  BFTENGINE_GEN_CONSTRUCT_FROM_BASE_MESSAGE(ReplicaStatusMsg)
+                   const std::string& spanContext = "");
 
   ViewNum getViewNumber() const;
 
@@ -52,15 +49,11 @@ class ReplicaStatusMsg : public MessageBase {
 
   bool isMissingPrePrepareMsgForViewChange(SeqNum seqNum) const;
 
-  bool hasComplaintFromReplica(ReplicaId replicaId) const;
-
   void setPrePrepareInActiveWindow(SeqNum seqNum) const;
 
   void setMissingViewChangeMsgForViewChange(ReplicaId replicaId);
 
   void setMissingPrePrepareMsgForViewChange(SeqNum seqNum);
-
-  void setComplaintFromReplica(ReplicaId replicaId);
 
   void validate(const ReplicasInfo&) const override;
 
@@ -86,8 +79,7 @@ class ReplicaStatusMsg : public MessageBase {
 #pragma pack(pop)
   static_assert(sizeof(Header) == (6 + 8 + 8 + 8 + 1), "Header is 31B");
 
-  static MsgSize calcSizeOfReplicaStatusMsg(bool viewIsActive,
-                                            bool listOfPrePrepareMsgsInActiveWindow,
+  static MsgSize calcSizeOfReplicaStatusMsg(bool listOfPrePrepareMsgsInActiveWindow,
                                             bool listOfMissingViewChangeMsgForViewChange,
                                             bool listOfMissingPrePrepareMsgForViewChange);
 

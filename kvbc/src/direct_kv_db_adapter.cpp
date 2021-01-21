@@ -124,8 +124,9 @@ int DBKeyComparator::composedKeyComparison(const char *_a_data,
       bChkpt = storage::v1DirectKeyValue::STKeyManipulator::extractCheckPointFromKey(_b_data, _b_length);
       return (aChkpt > bChkpt) ? 1 : (bChkpt > aChkpt) ? -1 : 0;
     }
+    case EDBKeyType::E_DB_KEY_TYPE_BFT_ST_RESERVED_PAGE_STATIC_KEY:
     case EDBKeyType::E_DB_KEY_TYPE_BFT_ST_RESERVED_PAGE_DYNAMIC_KEY: {
-      // Pages are sorted in ascending order, checkpoints in ascending order
+      // Pages are sorted in ascending order, checkpoints in descending order
       uint32_t aPageId, bPageId;
       uint64_t aChkpt, bChkpt;
       std::tie(aPageId, aChkpt) =
@@ -133,7 +134,7 @@ int DBKeyComparator::composedKeyComparison(const char *_a_data,
       std::tie(bPageId, bChkpt) =
           storage::v1DirectKeyValue::STKeyManipulator::extractPageIdAndCheckpointFromKey(_b_data, _b_length);
       if (aPageId != bPageId) return (aPageId > bPageId) ? 1 : (bPageId > aPageId) ? -1 : 0;
-      return (aChkpt < bChkpt) ? -1 : (aChkpt > bChkpt) ? 1 : 0;
+      return (aChkpt < bChkpt) ? 1 : (aChkpt > bChkpt) ? -1 : 0;
     }
     case EDBKeyType::E_DB_KEY_TYPE_KEY: {
       int keyComp = DBKeyManipulator::compareKeyPartOfComposedKey(_a_data, _a_length, _b_data, _b_length);
@@ -364,17 +365,13 @@ KeyValuePair DBKeyManipulator::composedToSimple(KeyValuePair _p) {
   return KeyValuePair(key, _p.second);
 }
 
-DBAdapter::DBAdapter(std::shared_ptr<storage::IDBClient> db,
-                     std::unique_ptr<IDataKeyGenerator> keyGen,
-                     bool use_mdt,
-                     bool save_kv_pairs_separately)
+DBAdapter::DBAdapter(std::shared_ptr<storage::IDBClient> db, std::unique_ptr<IDataKeyGenerator> keyGen, bool use_mdt)
     : logger_{logging::getLogger("concord.kvbc.v1DirectKeyValue.DBAdapter")},
       db_(db),
       keyGen_{std::move(keyGen)},
       mdt_{use_mdt},
       lastBlockId_{fetchLatestBlockId()},
-      lastReachableBlockId_{fetchLastReachableBlockId()},
-      saveKvPairsSeparately_{save_kv_pairs_separately} {}
+      lastReachableBlockId_{fetchLastReachableBlockId()} {}
 
 BlockId DBAdapter::addBlock(const SetOfKeyValuePairs &kv) {
   BlockId blockId = getLastReachableBlockId() + 1;
@@ -382,7 +379,7 @@ BlockId DBAdapter::addBlock(const SetOfKeyValuePairs &kv) {
   auto blockDigest = BlockDigest{};
   if (blockId > INITIAL_GENESIS_BLOCK_ID) {
     const auto parentBlockData = getRawBlock(blockId - 1);
-    blockDigest = bftEngine::bcst::computeBlockDigest(
+    blockDigest = bftEngine::SimpleBlockchainStateTransfer::computeBlockDigest(
         blockId - 1, reinterpret_cast<const char *>(parentBlockData.data()), parentBlockData.length());
   }
 
@@ -419,13 +416,11 @@ Status DBAdapter::addBlockAndUpdateMultiKey(const SetOfKeyValuePairs &_kvMap,
                                             const BlockId &_block,
                                             const Sliver &_blockRaw) {
   SetOfKeyValuePairs updatedKVMap;
-  if (saveKvPairsSeparately_) {
-    for (auto &it : _kvMap) {
-      Sliver composedKey = keyGen_->dataKey(it.first, _block);
-      LOG_TRACE(logger_,
-                "Updating composed key " << composedKey << " with value " << it.second << " in block " << _block);
-      updatedKVMap[composedKey] = it.second;
-    }
+  for (auto &it : _kvMap) {
+    Sliver composedKey = keyGen_->dataKey(it.first, _block);
+    LOG_TRACE(logger_,
+              "Updating composed key " << composedKey << " with value " << it.second << " in block " << _block);
+    updatedKVMap[composedKey] = it.second;
   }
   updatedKVMap[keyGen_->blockKey(_block)] = _blockRaw;
   return db_->multiPut(updatedKVMap);
@@ -446,10 +441,9 @@ void DBAdapter::deleteBlock(const BlockId &blockId) {
     KeysVector keysVec;
     const auto numOfElements = ((block::detail::Header *)blockRaw.data())->numberOfElements;
     auto *entries = (block::detail::Entry *)(blockRaw.data() + sizeof(block::detail::Header));
-    if (saveKvPairsSeparately_) {
-      for (size_t i = 0u; i < numOfElements; i++)
-        keysVec.push_back(keyGen_->dataKey(Key(blockRaw, entries[i].keyOffset, entries[i].keySize), blockId));
-    }
+    for (size_t i = 0u; i < numOfElements; i++)
+      keysVec.push_back(keyGen_->dataKey(Key(blockRaw, entries[i].keyOffset, entries[i].keySize), blockId));
+
     keysVec.push_back(keyGen_->blockKey(blockId));
 
     if (Status s = db_->multiDel(keysVec); !s.isOK())

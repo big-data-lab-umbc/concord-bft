@@ -21,8 +21,8 @@ using namespace bft::communication;
 
 MsgReceiver::MsgReceiver(std::shared_ptr<IncomingMsgsStorage> &storage) : incomingMsgsStorage_(storage) {}
 
-void MsgReceiver::onNewMessage(NodeNum sourceNode, const char *const message, size_t messageLength) {
-  if (messageLength > ReplicaConfig::instance().getmaxExternalMessageSize()) return;
+void MsgReceiver::onNewMessage(const NodeNum sourceNode, const char *const message, const size_t messageLength) {
+  if (messageLength > ReplicaConfigSingleton::GetInstance().GetMaxExternalMessageSize()) return;
   if (messageLength < sizeof(MessageBase::Header)) return;
 
   auto *msgBody = (MessageBase::Header *)std::malloc(messageLength);

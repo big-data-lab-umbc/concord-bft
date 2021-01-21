@@ -9,7 +9,7 @@
 set -e
 
 APT_GET_FLAGS="-y --no-install-recommends"
-WGET_FLAGS="--https-only -q"
+WGET_FLAGS="--no-check-certificate -q"
 
 # Install tools
 apt-get update && apt-get ${APT_GET_FLAGS} install \
@@ -25,10 +25,9 @@ apt-get update && apt-get ${APT_GET_FLAGS} install \
     gdbserver \
     git \
     iptables \
-    net-tools \
+    openssl \
     parallel \
     pkg-config \
-    psmisc \
     python3-pip \
     python3-setuptools \
     sudo \
@@ -54,10 +53,6 @@ apt-get ${APT_GET_FLAGS} install \
     libzstd-dev
 
 pip3 install --upgrade wheel && pip3 install --upgrade trio
-pip3 install \
-    eliot eliot-tree \
-    tatsu==4.4.0 \
-    pytest
 
 # Build 3rd parties
 cd ${HOME}
@@ -171,17 +166,3 @@ wget ${WGET_FLAGS} \
     make install && \
     cd ../.. && \
     rm -r opentracing-cpp-1.5.0
-
-# Get the newest openSSL installation (as of 9/2020)
-OPENSSL_VER='1.1.1g'
-cd /usr/local/src/
-wget ${WGET_FLAGS} https://www.openssl.org/source/openssl-${OPENSSL_VER}.tar.gz && \
-    tar -xf openssl-${OPENSSL_VER}.tar.gz && \
-    rm openssl-${OPENSSL_VER}.tar.gz && \
-    cd openssl-${OPENSSL_VER} && \
-    ./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl shared zlib && \
-    make && \
-    make install && \
-    echo "/usr/local/ssl/lib" > /etc/ld.so.conf.d/openssl-${OPENSSL_VER}.conf && \
-    ldconfig -v && \
-    rm -rf /usr/local/src/openssl-${OPENSSL_VER}

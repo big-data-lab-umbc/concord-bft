@@ -18,7 +18,6 @@
 
 using std::queue;
 using namespace std::chrono;
-using namespace concord::diagnostics;
 
 namespace bftEngine::impl {
 
@@ -63,15 +62,13 @@ void IncomingMsgsStorageImp::pushExternalMsg(std::unique_ptr<MessageBase> msg) {
   std::unique_lock<std::mutex> mlock(lock_);
   if (ptrProtectedQueueForExternalMessages_->size() >= maxNumberOfPendingExternalMsgs_) {
     Time now = getMonotonicTime();
-    auto msg_type = static_cast<MsgCode::Type>(msg->type());
     if ((now - lastOverflowWarning_) > (milliseconds(minTimeBetweenOverflowWarningsMilli_))) {
-      LOG_WARN(GL, "Queue Full. Dropping some msgs." << KVLOG(maxNumberOfPendingExternalMsgs_, msg_type));
+      LOG_WARN(GL,
+               "More than " << maxNumberOfPendingExternalMsgs_
+                            << " pending messages in queue - may ignore some of the messages!");
       lastOverflowWarning_ = now;
     }
-    dropped_msgs++;
   } else {
-    histograms_.dropped_msgs_in_a_row->record(dropped_msgs);
-    dropped_msgs = 0;
     ptrProtectedQueueForExternalMessages_->push(std::move(msg));
     condVar_.notify_one();
   }
@@ -86,7 +83,6 @@ void IncomingMsgsStorageImp::pushInternalMsg(InternalMessage&& msg) {
 
 // should only be called by the dispatching thread
 IncomingMsg IncomingMsgsStorageImp::getMsgForProcessing() {
-  TimeRecorder scoped_timer(*histograms_.get_msg_for_processing);
   auto msg = popThreadLocal();
   if (msg.tag != IncomingMsg::INVALID) return msg;
   {
@@ -104,12 +100,10 @@ IncomingMsg IncomingMsgsStorageImp::getMsgForProcessing() {
       std::queue<std::unique_ptr<MessageBase>>* t1 = ptrThreadLocalQueueForExternalMessages_;
       ptrThreadLocalQueueForExternalMessages_ = ptrProtectedQueueForExternalMessages_;
       ptrProtectedQueueForExternalMessages_ = t1;
-      histograms_.external_queue_len_at_swap->record(ptrThreadLocalQueueForExternalMessages_->size());
 
       auto* t2 = ptrThreadLocalQueueForInternalMessages_;
       ptrThreadLocalQueueForInternalMessages_ = ptrProtectedQueueForInternalMessages_;
       ptrProtectedQueueForInternalMessages_ = t2;
-      histograms_.internal_queue_len_at_swap->record(ptrThreadLocalQueueForInternalMessages_->size());
     }
   }
   return popThreadLocal();
@@ -152,9 +146,7 @@ void IncomingMsgsStorageImp::dispatchMessages(std::promise<void>& signalStarted)
           if (msgHandlerCallback) {
             msgHandlerCallback(message);
           } else {
-            LOG_WARN(
-                GL,
-                "Received unknown external Message: " << KVLOG(message->type(), message->senderId(), message->size()));
+            LOG_WARN(GL, "Delete unknown message type: " << message->type());
             delete message;
           }
           break;
@@ -164,7 +156,7 @@ void IncomingMsgsStorageImp::dispatchMessages(std::promise<void>& signalStarted)
     }
   } catch (const std::exception& e) {
     LOG_FATAL(GL, "Exception: " << e.what() << "exiting ...");
-    std::terminate();
+    exit(1);
   }
 }
 

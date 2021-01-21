@@ -11,9 +11,7 @@
 
 #include "SeqNumInfo.hpp"
 #include "InternalReplicaApi.hpp"
-#include "OpenTracing.hpp"
 #include "messages/SignatureInternalMsgs.hpp"
-#include "CryptoManager.hpp"
 
 namespace bftEngine {
 namespace impl {
@@ -38,18 +36,6 @@ SeqNumInfo::~SeqNumInfo() {
   delete commitMsgsCollector;
   delete partialProofsSet;
 }
-
-void SeqNumInfo::acquire(SeqNumInfo& rhs) {
-  prePrepareMsg = rhs.prePrepareMsg;
-  rhs.prePrepareMsg = nullptr;
-
-  prepareSigCollector->acquire(rhs.prepareSigCollector);
-  commitMsgsCollector->acquire(rhs.commitMsgsCollector);
-  partialProofsSet->acquire(rhs.partialProofsSet);
-}
-void SeqNumInfo::resetCommitSignatres() { commitMsgsCollector->resetAndFree(); }
-
-void SeqNumInfo::resetPrepareSignatures() { prepareSigCollector->resetAndFree(); }
 
 void SeqNumInfo::resetAndFree() {
   delete prePrepareMsg;
@@ -291,7 +277,7 @@ void SeqNumInfo::onCompletionOfPrepareSignaturesProcessing(SeqNum seqNumber,
                                                            ViewNum viewNumber,
                                                            const char* combinedSig,
                                                            uint16_t combinedSigLen,
-                                                           const concordUtils::SpanContext& span_context) {
+                                                           const std::string& span_context) {
   prepareSigCollector->onCompletionOfSignaturesProcessing(
       seqNumber, viewNumber, combinedSig, combinedSigLen, span_context);
 }
@@ -304,13 +290,12 @@ void SeqNumInfo::onCompletionOfCombinedPrepareSigVerification(SeqNum seqNumber, 
 // class SeqNumInfo::ExFuncForPrepareCollector
 ///////////////////////////////////////////////////////////////////////////////
 
-PrepareFullMsg* SeqNumInfo::ExFuncForPrepareCollector::createCombinedSignatureMsg(
-    void* context,
-    SeqNum seqNumber,
-    ViewNum viewNumber,
-    const char* const combinedSig,
-    uint16_t combinedSigLen,
-    const concordUtils::SpanContext& span_context) {
+PrepareFullMsg* SeqNumInfo::ExFuncForPrepareCollector::createCombinedSignatureMsg(void* context,
+                                                                                  SeqNum seqNumber,
+                                                                                  ViewNum viewNumber,
+                                                                                  const char* const combinedSig,
+                                                                                  uint16_t combinedSigLen,
+                                                                                  const std::string& span_context) {
   InternalReplicaApi* r = (InternalReplicaApi*)context;
   return PrepareFullMsg::create(
       viewNumber, seqNumber, r->getReplicasInfo().myId(), combinedSig, combinedSigLen, span_context);
@@ -326,7 +311,7 @@ InternalMessage SeqNumInfo::ExFuncForPrepareCollector::createInterCombinedSigSuc
     ViewNum viewNumber,
     const char* combinedSig,
     uint16_t combinedSigLen,
-    const concordUtils::SpanContext& span_context) {
+    const std::string& span_context) {
   return CombinedSigSucceededInternalMsg(seqNumber, viewNumber, combinedSig, combinedSigLen, span_context);
 }
 
@@ -342,8 +327,9 @@ uint16_t SeqNumInfo::ExFuncForPrepareCollector::numberOfRequiredSignatures(void*
   return (uint16_t)((info.fVal() * 2) + info.cVal() + 1);
 }
 
-std::shared_ptr<IThresholdVerifier> SeqNumInfo::ExFuncForPrepareCollector::thresholdVerifier() {
-  return CryptoManager::instance().thresholdVerifierForSlowPathCommit();
+IThresholdVerifier* SeqNumInfo::ExFuncForPrepareCollector::thresholdVerifier(void* context) {
+  InternalReplicaApi* r = (InternalReplicaApi*)context;
+  return r->getThresholdVerifierForSlowPathCommit();
 }
 
 util::SimpleThreadPool& SeqNumInfo::ExFuncForPrepareCollector::threadPool(void* context) {
@@ -360,13 +346,12 @@ IncomingMsgsStorage& SeqNumInfo::ExFuncForPrepareCollector::incomingMsgsStorage(
 // class SeqNumInfo::ExFuncForCommitCollector
 ///////////////////////////////////////////////////////////////////////////////
 
-CommitFullMsg* SeqNumInfo::ExFuncForCommitCollector::createCombinedSignatureMsg(
-    void* context,
-    SeqNum seqNumber,
-    ViewNum viewNumber,
-    const char* const combinedSig,
-    uint16_t combinedSigLen,
-    const concordUtils::SpanContext& span_context) {
+CommitFullMsg* SeqNumInfo::ExFuncForCommitCollector::createCombinedSignatureMsg(void* context,
+                                                                                SeqNum seqNumber,
+                                                                                ViewNum viewNumber,
+                                                                                const char* const combinedSig,
+                                                                                uint16_t combinedSigLen,
+                                                                                const std::string& span_context) {
   InternalReplicaApi* r = (InternalReplicaApi*)context;
   return CommitFullMsg::create(
       viewNumber, seqNumber, r->getReplicasInfo().myId(), combinedSig, combinedSigLen, span_context);
@@ -377,12 +362,11 @@ InternalMessage SeqNumInfo::ExFuncForCommitCollector::createInterCombinedSigFail
   return CombinedCommitSigFailedInternalMsg(seqNumber, viewNumber, replicasWithBadSigs);
 }
 
-InternalMessage SeqNumInfo::ExFuncForCommitCollector::createInterCombinedSigSucceeded(
-    SeqNum seqNumber,
-    ViewNum viewNumber,
-    const char* combinedSig,
-    uint16_t combinedSigLen,
-    const concordUtils::SpanContext& span_context) {
+InternalMessage SeqNumInfo::ExFuncForCommitCollector::createInterCombinedSigSucceeded(SeqNum seqNumber,
+                                                                                      ViewNum viewNumber,
+                                                                                      const char* combinedSig,
+                                                                                      uint16_t combinedSigLen,
+                                                                                      const std::string& span_context) {
   return CombinedCommitSigSucceededInternalMsg(seqNumber, viewNumber, combinedSig, combinedSigLen, span_context);
 }
 
@@ -398,8 +382,9 @@ uint16_t SeqNumInfo::ExFuncForCommitCollector::numberOfRequiredSignatures(void* 
   return (uint16_t)((info.fVal() * 2) + info.cVal() + 1);
 }
 
-std::shared_ptr<IThresholdVerifier> SeqNumInfo::ExFuncForCommitCollector::thresholdVerifier() {
-  return CryptoManager::instance().thresholdVerifierForSlowPathCommit();
+IThresholdVerifier* SeqNumInfo::ExFuncForCommitCollector::thresholdVerifier(void* context) {
+  InternalReplicaApi* r = (InternalReplicaApi*)context;
+  return r->getThresholdVerifierForSlowPathCommit();
 }
 
 util::SimpleThreadPool& SeqNumInfo::ExFuncForCommitCollector::threadPool(void* context) {

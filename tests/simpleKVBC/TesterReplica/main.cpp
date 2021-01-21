@@ -29,8 +29,6 @@
 
 namespace concord::kvbc::test {
 
-std::atomic_bool timeToExit = false;
-
 void run_replica(int argc, char** argv) {
   const auto setup = TestSetup::ParseArgs(argc, argv);
   logging::initLogger(setup->getLogPropertiesFile());
@@ -56,25 +54,17 @@ void run_replica(int argc, char** argv) {
   // registration of metrics from the replica with the aggregator and don't
   // return empty metrics from the metrics server.
   setup->GetMetricsServer().Start();
-  while (replica->isRunning()) {
-    if (timeToExit) {
-      setup->GetMetricsServer().Stop();
-      replica->stop();
-    } else {
-      std::this_thread::sleep_for(std::chrono::seconds(1));
-    }
-  }
+  while (replica->isRunning()) std::this_thread::sleep_for(std::chrono::seconds(1));
 }
 }  // namespace concord::kvbc::test
 
 using namespace std;
 
-namespace {
-static void signal_handler(int signal_num) {
+void signal_handler(int signal_num) {
   LOG_INFO(GL, "Program received signal " << signal_num);
-  concord::kvbc::test::timeToExit = true;
+  exit(0);
 }
-}  // namespace
+
 int main(int argc, char** argv) {
   signal(SIGINT, signal_handler);
   signal(SIGTERM, signal_handler);

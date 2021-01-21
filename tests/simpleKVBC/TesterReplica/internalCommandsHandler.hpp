@@ -22,38 +22,25 @@
 #include "KVBCInterfaces.h"
 #include <memory>
 #include "ControlStateManager.hpp"
-#include <chrono>
-#include <thread>
 
-class InternalControlHandlers : public bftEngine::ControlHandlers {
-  bool stoppedOnSuperStableCheckpoint = false;
-  bool stoppedOnStableCheckpoint = false;
-
- public:
-  void onSuperStableCheckpoint() override { stoppedOnSuperStableCheckpoint = true; }
-  void onStableCheckpoint() override { stoppedOnStableCheckpoint = true; }
-  bool onPruningProcess() override { return false; }
-
-  virtual ~InternalControlHandlers(){};
-  bool haveYouStopped(uint64_t n_of_n) {
-    return n_of_n == 1 ? stoppedOnSuperStableCheckpoint : stoppedOnStableCheckpoint;
-  }
-};
 class InternalCommandsHandler : public concord::kvbc::ICommandsHandler {
  public:
   InternalCommandsHandler(concord::kvbc::ILocalKeyValueStorageReadOnly *storage,
                           concord::kvbc::IBlocksAppender *blocksAppender,
                           concord::kvbc::IBlockMetadata *blockMetadata,
                           logging::Logger &logger)
-      : m_storage(storage),
-        m_blocksAppender(blocksAppender),
-        m_blockMetadata(blockMetadata),
-        m_logger(logger),
-        controlHandlers_(std::make_shared<InternalControlHandlers>()) {}
+      : m_storage(storage), m_blocksAppender(blocksAppender), m_blockMetadata(blockMetadata), m_logger(logger) {}
 
-  virtual void execute(ExecutionRequestsQueue &requests,
-                       const std::string &batchCid,
-                       concordUtils::SpanWrapper &parent_span) override;
+  virtual int execute(uint16_t clientId,
+                      uint64_t sequenceNum,
+                      uint8_t flags,
+                      uint32_t requestSize,
+                      const char *request,
+                      uint32_t maxReplySize,
+                      char *outReply,
+                      uint32_t &outActualReplySize,
+                      uint32_t &outActualReplicaSpecificInfoSize,
+                      concordUtils::SpanWrapper &span) override;
 
   void setControlStateManager(std::shared_ptr<bftEngine::ControlStateManager> controlStateManager) override;
 
@@ -66,12 +53,8 @@ class InternalCommandsHandler : public concord::kvbc::ICommandsHandler {
                            char *outReply,
                            uint32_t &outReplySize);
 
-  bool executeReadOnlyCommand(uint32_t requestSize,
-                              const char *request,
-                              size_t maxReplySize,
-                              char *outReply,
-                              uint32_t &outReplySize,
-                              uint32_t &specificReplicaInfoOutReplySize);
+  bool executeReadOnlyCommand(
+      uint32_t requestSize, const char *request, size_t maxReplySize, char *outReply, uint32_t &outReplySize);
 
   bool verifyWriteCommand(uint32_t requestSize,
                           const BasicRandomTests::SimpleCondWriteRequest &request,
@@ -84,17 +67,11 @@ class InternalCommandsHandler : public concord::kvbc::ICommandsHandler {
   bool executeGetBlockDataCommand(
       uint32_t requestSize, const char *request, size_t maxReplySize, char *outReply, uint32_t &outReplySize);
 
-  bool executeHaveYouStoppedReadCommand(uint32_t requestSize,
-                                        const char *request,
-                                        size_t maxReplySize,
-                                        char *outReply,
-                                        uint32_t &outReplySize,
-                                        uint32_t &specificReplicaInfoSize);
   bool executeGetLastBlockCommand(uint32_t requestSize, size_t maxReplySize, char *outReply, uint32_t &outReplySize);
 
   void addMetadataKeyValue(concord::storage::SetOfKeyValuePairs &updates, uint64_t sequenceNum) const;
 
-  std::shared_ptr<bftEngine::ControlHandlers> getControlHandlers() override { return controlHandlers_; }
+  std::shared_ptr<bftEngine::ControlHandlers> getControlHandlers() override { return nullptr; }
 
  private:
   static concordUtils::Sliver buildSliverFromStaticBuf(char *buf);
@@ -108,5 +85,4 @@ class InternalCommandsHandler : public concord::kvbc::ICommandsHandler {
   size_t m_writesCounter = 0;
   size_t m_getLastBlockCounter = 0;
   std::shared_ptr<bftEngine::ControlStateManager> controlStateManager_;
-  std::shared_ptr<InternalControlHandlers> controlHandlers_;
 };

@@ -65,8 +65,8 @@ const char publicKeyValue4[] =
     "F6605C909F98B6C3F795354BBB988C9695F8A1E27FFC3CE4FFA64B549DD9072763404FBD352C5C1A05FA3D17377E113600B1EDCAEE17687BC4"
     "C1AA6F3D020111";
 
-bftEngine::ReplicaConfig& createReplicaConfig() {
-  bftEngine::ReplicaConfig& config = bftEngine::ReplicaConfig::instance();
+bftEngine::ReplicaConfig createReplicaConfig() {
+  bftEngine::ReplicaConfig config;
   config.numReplicas = 4;
   config.fVal = 1;
   config.cVal = 0;
@@ -90,7 +90,24 @@ bftEngine::ReplicaConfig& createReplicaConfig() {
   config.publicKeysOfReplicas.insert(IdToKeyPair(2, publicKeyValue3));
   config.publicKeysOfReplicas.insert(IdToKeyPair(3, publicKeyValue4));
 
-  bftEngine::CryptoManager::instance(&config, new TestCryptoSystem);
-
+  config.thresholdSignerForExecution = nullptr;
+  config.thresholdVerifierForExecution = new IThresholdVerifierDummy;
+  config.thresholdSignerForSlowPathCommit = new IThresholdSignerDummy;
+  config.thresholdVerifierForSlowPathCommit = new IThresholdVerifierDummy;
+  config.thresholdSignerForCommit = new IThresholdSignerDummy;
+  config.thresholdVerifierForCommit = new IThresholdVerifierDummy;
+  config.thresholdSignerForOptimisticCommit = new IThresholdSignerDummy;
+  config.thresholdVerifierForOptimisticCommit = new IThresholdVerifierDummy;
+  config.singletonFromThis();
   return config;
+}
+
+void destroyReplicaConfig(bftEngine::ReplicaConfig& config) {
+  delete config.thresholdVerifierForExecution;
+  delete config.thresholdSignerForSlowPathCommit;
+  delete config.thresholdVerifierForSlowPathCommit;
+  delete config.thresholdSignerForCommit;
+  delete config.thresholdVerifierForCommit;
+  delete config.thresholdSignerForOptimisticCommit;
+  delete config.thresholdVerifierForOptimisticCommit;
 }

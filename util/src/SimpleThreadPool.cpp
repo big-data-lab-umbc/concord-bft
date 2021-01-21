@@ -11,7 +11,6 @@
 
 #include "SimpleThreadPool.hpp"
 #include "Logger.hpp"
-#include <exception>
 #include <iostream>
 #include <mutex>
 
@@ -87,11 +86,9 @@ void SimpleThreadPool::execute(Job* j) {
   try {
     j->execute();
   } catch (std::exception& e) {
-    LOG_FATAL(SP, "SimpleThreadPool: exception during execution of " << typeid(*j).name() << " Reason: " << e.what());
-    std::terminate();
+    LOG_ERROR(SP, "SimpleThreadPool: exception during execution of " << typeid(*j).name() << " Reason: " << e.what());
   } catch (...) {
-    LOG_FATAL(SP, "SimpleThreadPool: unknown exception during execution of " << typeid(*j).name());
-    std::terminate();
+    LOG_ERROR(SP, "SimpleThreadPool: unknown exception during execution of " << typeid(*j).name());
   }
 }
 

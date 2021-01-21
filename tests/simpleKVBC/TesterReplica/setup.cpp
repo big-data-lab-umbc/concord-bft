@@ -36,7 +36,7 @@ namespace concord::kvbc {
 std::unique_ptr<TestSetup> TestSetup::ParseArgs(int argc, char** argv) {
   try {
     // used to get info from parsing the key file
-    bftEngine::ReplicaConfig& replicaConfig = bftEngine::ReplicaConfig::instance();
+    bftEngine::ReplicaConfig replicaConfig;
     replicaConfig.numOfClientProxies = 100;
     replicaConfig.numOfExternalClients = 30;
     replicaConfig.concurrencyLevel = 1;
@@ -44,12 +44,11 @@ std::unique_ptr<TestSetup> TestSetup::ParseArgs(int argc, char** argv) {
     replicaConfig.viewChangeTimerMillisec = 45 * 1000;
     replicaConfig.statusReportTimerMillisec = 10 * 1000;
     replicaConfig.preExecutionFeatureEnabled = true;
-    replicaConfig.set("sourceReplicaReplacementTimeoutMilli", 6000);
+
     PersistencyMode persistMode = PersistencyMode::Off;
     std::string keysFilePrefix;
     std::string commConfigFile;
     std::string s3ConfigFile;
-    std::string certRootPath = "certs";
     std::string logPropsFile = "logging.properties";
     // Set StorageType::V1DirectKeyValue as the default storage type.
     auto storageType = StorageType::V1DirectKeyValue;
@@ -64,19 +63,12 @@ std::unique_ptr<TestSetup> TestSetup::ParseArgs(int argc, char** argv) {
                                           {"persistence-mode", no_argument, 0, 'p'},
                                           {"storage-type", required_argument, 0, 't'},
                                           {"log-props-file", required_argument, 0, 'l'},
-                                          {"key-exchange-on-start", required_argument, 0, 'e'},
-                                          {"cert-root-path", required_argument, 0, 'c'},
-                                          {"consensus-batching-policy", required_argument, 0, 'b'},
-                                          {"consensus-batching-max-reqs-size", required_argument, 0, 'm'},
-                                          {"consensus-batching-max-req-num", required_argument, 0, 'q'},
-                                          {"consensus-batching-flush-period", required_argument, 0, 'z'},
-                                          {"consensus-concurrency-level", required_argument, 0, 'y'},
                                           {0, 0, 0, 0}};
 
     int o = 0;
     int optionIndex = 0;
     LOG_INFO(GL, "Command line options:");
-    while ((o = getopt_long(argc, argv, "i:k:n:s:v:a:3:pt:l:c:e:b:m:q:y:z:", longOptions, &optionIndex)) != -1) {
+    while ((o = getopt_long(argc, argv, "i:k:n:s:v:a:3:pt:l:", longOptions, &optionIndex)) != -1) {
       switch (o) {
         case 'i': {
           replicaConfig.replicaId = concord::util::to<std::uint16_t>(std::string(optarg));
@@ -104,16 +96,8 @@ std::unique_ptr<TestSetup> TestSetup::ParseArgs(int argc, char** argv) {
           if (optarg[0] == '-') throw std::runtime_error("invalid argument for --s3-config-file");
           s3ConfigFile = optarg;
         } break;
-        case 'e': {
-          replicaConfig.keyExchangeOnStart = true;
-        } break;
-        case 'y': {
-          const auto concurrencyLevel = concord::util::to<std::uint16_t>(std::string(optarg));
-          if (concurrencyLevel < 1 || concurrencyLevel > 30)
-            throw std::runtime_error{"invalid argument for --consensus-concurrency-level"};
-          replicaConfig.concurrencyLevel = concurrencyLevel;
-        } break;
-        // We can only toggle persistence on or off. It defaults to InMemory unless -p flag is provided.
+        // We can only toggle persistence on or off. It defaults to InMemory
+        // unless -p flag is provided.
         case 'p': {
           persistMode = PersistencyMode::RocksDB;
         } break;
@@ -128,31 +112,6 @@ std::unique_ptr<TestSetup> TestSetup::ParseArgs(int argc, char** argv) {
         } break;
         case 'l': {
           logPropsFile = optarg;
-          break;
-        }
-        case 'c': {
-          certRootPath = optarg;
-          break;
-        }
-        case 'b': {
-          auto policy = concord::util::to<std::uint32_t>(std::string(optarg));
-          if (policy < bftEngine::BATCH_SELF_ADJUSTED || policy > bftEngine::BATCH_BY_REQ_NUM)
-            throw std::runtime_error{"invalid argument for --consensus-batching-policy"};
-          replicaConfig.batchingPolicy = policy;
-          break;
-        }
-        case 'm': {
-          replicaConfig.maxBatchSizeInBytes = concord::util::to<std::uint32_t>(std::string(optarg));
-          break;
-        }
-        case 'q': {
-          replicaConfig.maxNumOfRequestsInBatch = concord::util::to<std::uint32_t>(std::string(optarg));
-          break;
-        }
-        case 'z': {
-          const auto batchFlushPeriod = concord::util::to<std::uint32_t>(std::string(optarg));
-          if (!batchFlushPeriod) throw std::runtime_error{"invalid argument for --consensus-batching-flush-period"};
-          replicaConfig.batchFlushPeriod = batchFlushPeriod;
           break;
         }
         case '?': {
@@ -177,7 +136,7 @@ std::unique_ptr<TestSetup> TestSetup::ParseArgs(int argc, char** argv) {
         true, replicaConfig.replicaId, replicaConfig.numOfClientProxies, numOfReplicas, commConfigFile);
 #elif USE_COMM_TLS_TCP
     bft::communication::TlsTcpConfig conf = testCommConfig.GetTlsTCPConfig(
-        true, replicaConfig.replicaId, replicaConfig.numOfClientProxies, numOfReplicas, commConfigFile, certRootPath);
+        true, replicaConfig.replicaId, replicaConfig.numOfClientProxies, numOfReplicas, commConfigFile);
 #else
     bft::communication::PlainUdpConfig conf = testCommConfig.GetUDPConfig(
         true, replicaConfig.replicaId, replicaConfig.numOfClientProxies, numOfReplicas, commConfigFile);
@@ -223,7 +182,7 @@ concord::storage::s3::StoreConfig TestSetup::ParseS3Config(const std::string& s3
     if (v.size()) {
       return v[0];
     } else {
-      throw std::runtime_error("failed to parse " + s3ConfigFile + ": " + key + " is not set.");
+      throw std::runtime_error("failed to parse" + s3ConfigFile + ": " + key + " is not set.");
     }
   };
 
@@ -233,15 +192,6 @@ concord::storage::s3::StoreConfig TestSetup::ParseS3Config(const std::string& s3
   config.protocol = get_config_value("s3-protocol");
   config.url = get_config_value("s3-url");
   config.secretKey = get_config_value("s3-secret-key");
-  try {
-    // TesterReplica is used for Apollo tests. Each test is executed against new blockchain, so we need brand new
-    // bucket for the RO replica. To achieve this we use a hack - set the prefix to a uniqe value so each RO replica
-    // writes in the same bucket but in different directory.
-    // So if s3-path-prefix is NOT SET it is initialised to a unique value based on current time.
-    config.pathPrefix = get_config_value("s3-path-prefix");
-  } catch (std::runtime_error& e) {
-    config.pathPrefix = std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-  }
 
   LOG_INFO(logger_,
            "\nS3 Configuration:"

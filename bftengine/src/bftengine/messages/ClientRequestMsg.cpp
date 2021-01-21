@@ -39,23 +39,18 @@ ClientRequestMsg::ClientRequestMsg(NodeIdType sender,
                                    const char* request,
                                    uint64_t reqTimeoutMilli,
                                    const std::string& cid,
-                                   const concordUtils::SpanContext& spanContext)
+                                   const std::string& spanContext)
     : MessageBase(sender,
                   MsgCode::ClientRequest,
-                  spanContext.data().size(),
+                  spanContext.size(),
                   (sizeof(ClientRequestMsgHeader) + requestLength + cid.size())) {
   setParams(sender, reqSeqNum, requestLength, flags, reqTimeoutMilli, cid);
   char* position = body() + sizeof(ClientRequestMsgHeader);
-  memcpy(position, spanContext.data().data(), spanContext.data().size());
-  position += spanContext.data().size();
+  memcpy(position, spanContext.data(), spanContext.size());
+  position += spanContext.size();
   memcpy(position, request, requestLength);
   position += requestLength;
   memcpy(position, cid.data(), cid.size());
-}
-
-ClientRequestMsg::ClientRequestMsg(NodeIdType sender)
-    : MessageBase(sender, MsgCode::ClientRequest, 0, (sizeof(ClientRequestMsgHeader))) {
-  msgBody()->flags &= EMPTY_CLIENT_REQ;
 }
 
 ClientRequestMsg::ClientRequestMsg(ClientRequestMsgHeader* body)

@@ -23,14 +23,11 @@ using namespace bftEngine;
 uint16_t PreProcessReplyMsg::maxReplyMsgSize_ = 1024;
 
 PreProcessReplyMsg::PreProcessReplyMsg(SigManagerSharedPtr sigManager,
-                                       preprocessor::PreProcessorRecorder* histograms,
                                        NodeIdType senderId,
                                        uint16_t clientId,
-                                       uint64_t reqSeqNum,
-                                       uint64_t reqRetryId)
+                                       uint64_t reqSeqNum)
     : MessageBase(senderId, MsgCode::PreProcessReply, 0, maxReplyMsgSize_), sigManager_(sigManager) {
-  setPreProcessorHistograms(histograms);
-  setParams(senderId, clientId, reqSeqNum, reqRetryId);
+  setParams(senderId, clientId, reqSeqNum);
 }
 
 void PreProcessReplyMsg::validate(const ReplicasInfo& repInfo) const {
@@ -42,12 +39,9 @@ void PreProcessReplyMsg::validate(const ReplicasInfo& repInfo) const {
   auto& msgHeader = *msgBody();
   ConcordAssert(msgHeader.senderId != repInfo.myId());
 
-  if (sigManager_ == nullptr) throw runtime_error(__PRETTY_FUNCTION__ + string(": verifySig"));
-
   uint16_t sigLen = sigManager_->getSigLength(msgHeader.senderId);
   if (size() < (sizeof(Header) + sigLen)) throw runtime_error(__PRETTY_FUNCTION__ + string(": size"));
 
-  concord::diagnostics::TimeRecorder scoped_timer(*preProcessorHistograms_->validateMessage);
   if (!sigManager_->verifySig(msgHeader.senderId,
                               (char*)msgBody()->resultsHash,
                               SHA3_256::SIZE_IN_BYTES,
@@ -56,53 +50,32 @@ void PreProcessReplyMsg::validate(const ReplicasInfo& repInfo) const {
     throw runtime_error(__PRETTY_FUNCTION__ + string(": verifySig"));
 }
 
-void PreProcessReplyMsg::setParams(NodeIdType senderId, uint16_t clientId, ReqId reqSeqNum, uint64_t reqRetryId) {
+void PreProcessReplyMsg::setParams(NodeIdType senderId, uint16_t clientId, ReqId reqSeqNum) {
   msgBody()->senderId = senderId;
   msgBody()->reqSeqNum = reqSeqNum;
   msgBody()->clientId = clientId;
-  msgBody()->reqRetryId = reqRetryId;
-  LOG_DEBUG(logger(), KVLOG(senderId, clientId, reqSeqNum, reqRetryId));
+  LOG_DEBUG(logger(), "senderId=" << senderId << " clientId=" << clientId << " reqSeqNum=" << reqSeqNum);
 }
 
-void PreProcessReplyMsg::setupMsgBody(const char* preProcessResultBuf,
-                                      uint32_t preProcessResultBufLen,
-                                      const std::string& cid,
-                                      ReplyStatus status) {
+void PreProcessReplyMsg::setupMsgBody(const char* buf, uint32_t bufLen, const std::string& cid) {
+  const uint16_t sigSize = sigManager_->getMySigLength();
   const uint16_t headerSize = sizeof(Header);
-  uint16_t sigSize = 0;
-  if (status == STATUS_GOOD) {
-    sigSize = sigManager_->getMySigLength();
-    SHA3_256::Digest hash;
-    {
-      concord::diagnostics::TimeRecorder scoped_timer(*preProcessorHistograms_->calculateHash);
-      // Calculate pre-process result hash
-      hash = SHA3_256().digest(preProcessResultBuf, preProcessResultBufLen);
-      memcpy(msgBody()->resultsHash, hash.data(), SHA3_256::SIZE_IN_BYTES);
-    }
-    {
-      concord::diagnostics::TimeRecorder scoped_timer(*preProcessorHistograms_->signHash);
-      sigManager_->sign((char*)hash.data(), SHA3_256::SIZE_IN_BYTES, body() + headerSize, sigSize);
-    }
-  }
+
+  // Calculate pre-process result hash
+  auto hash = SHA3_256().digest(buf, bufLen);
+  memcpy(msgBody()->resultsHash, hash.data(), SHA3_256::SIZE_IN_BYTES);
+
+  // Sign hash
+  sigManager_->sign((char*)hash.data(), SHA3_256::SIZE_IN_BYTES, body() + headerSize, sigSize);
   memcpy(body() + headerSize + sigSize, cid.c_str(), cid.size());
-  msgBody()->status = status;
   msgBody()->cidLength = cid.size();
-  msgBody()->replyLength = sigSize;
   msgSize_ = headerSize + sigSize + msgBody()->cidLength;
-
-  SCOPED_MDC_CID(cid);
-  LOG_INFO(logger(),
-           KVLOG(status,
-                 msgBody()->senderId,
-                 msgBody()->clientId,
-                 msgBody()->reqSeqNum,
-                 headerSize,
-                 sigSize,
-                 cid.size(),
-                 preProcessResultBufLen,
-                 msgSize_));
+  msgBody()->replyLength = sigSize;
+  LOG_DEBUG(logger(),
+            "senderId=" << msgBody()->senderId << " clientId=" << msgBody()->clientId
+                        << " reqSeqNum=" << msgBody()->reqSeqNum << " headerSize=" << headerSize
+                        << " sigSize=" << sigSize << " cidSize=" << cid.size() << " msgSize_=" << msgSize_);
 }
-
 std::string PreProcessReplyMsg::getCid() const {
   return std::string(body() + msgSize_ - msgBody()->cidLength, msgBody()->cidLength);
 }

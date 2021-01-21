@@ -12,14 +12,4 @@ if(benchmark_FOUND)
         corebft
         kvbc
     )
-
-    if (BUILD_ROCKSDB_STORAGE)
-    add_executable(categorization_benchmark categorization_benchmark.cpp )
-    target_link_libraries(categorization_benchmark PUBLIC
-        benchmark
-        util
-        corebft
-        kvbc
-    )
-    endif (BUILD_ROCKSDB_STORAGE)
-endif(benchmark_FOUND)
+endif()

@@ -24,29 +24,10 @@ from util import skvbc as kvbc
 from util.skvbc import SimpleKVBCProtocol
 from util.skvbc_history_tracker import verify_linearizability
 from math import inf
-from util import eliot_logging as log
 
 from util.bft import KEY_FILE_PREFIX, with_trio, with_bft_network
 
 def start_replica_cmd(builddir, replica_id, config):
-    """
-    There are two test s3 config files. The one used here hasn't got s3-prefix parameter
-    set which means that on each RO replica start the prefix is some unique time based
-    value. 
-    The effect of this is that on each RO replica start we have got empty S3 storage.
-    This is the default behaviour for most of the tests.
-    """
-    return start_replica_cmd_imp(builddir, replica_id, config, "test_s3_config.txt")
-
-def start_replica_cmd_prefix(builddir, replica_id, config):
-    """
-    In test_s3_config_prefix.txt the s3-prefix parameter is set, which means that its value
-    doesn't change between RO replica restarts.
-    This means that the state fetched on S3 is persisted on RO replica restart.
-    """
-    return start_replica_cmd_imp(builddir, replica_id, config, "test_s3_config_prefix.txt")
-
-def start_replica_cmd_imp(builddir, replica_id, config, s3_config):
     """
     Return a command that starts an skvbc replica when passed to
     subprocess.Popen.
@@ -59,7 +40,7 @@ def start_replica_cmd_imp(builddir, replica_id, config, s3_config):
     statusTimerMilli = "500"
     viewChangeTimeoutMilli = "10000"
     ro_params = [ "--s3-config-file",
-                    os.path.join(builddir, "tests", "simpleKVBC", "scripts", s3_config)
+                    os.path.join(builddir, "tests", "simpleKVBC", "scripts", "test_s3_config.txt")
                 ]
     path = os.path.join(builddir, "tests", "simpleKVBC", "TesterReplica", "skvbc_replica")
     ret = [path,
@@ -67,8 +48,7 @@ def start_replica_cmd_imp(builddir, replica_id, config, s3_config):
             "-i", str(replica_id),
             "-s", statusTimerMilli,
             "-p",
-            "-t", os.environ.get('STORAGE_TYPE'),
-            "-l", os.path.join(builddir, "tests", "simpleKVBC", "scripts", "logging.properties")
+            "-t", os.environ.get('STORAGE_TYPE')
             ]
     if replica_id >= config.n and replica_id < config.n + config.num_ro_replicas and os.environ.get("CONCORD_BFT_MINIO_BINARY_PATH"):
         ret.extend(ro_params)
@@ -84,7 +64,7 @@ class SkvbcReadOnlyReplicaTest(unittest.TestCase):
     """
     @classmethod
     def _start_s3_server(cls):
-        log.log_message(message_type="Starting server")
+        print("Starting server")
         server_env = os.environ.copy()
         server_env["MINIO_ACCESS_KEY"] = "concordbft"
         server_env["MINIO_SECRET_KEY"] = "concordbft"
@@ -99,8 +79,12 @@ class SkvbcReadOnlyReplicaTest(unittest.TestCase):
                                                     close_fds=True)
 
     @classmethod
-    def setUpClass(cls):        
-        log.log_message(message_type="CONCORD_BFT_MINIO_BINARY_PATH is set. Running in S3 mode.")
+    def setUpClass(cls):
+        if not os.environ.get("CONCORD_BFT_MINIO_BINARY_PATH"):
+            print("CONCORD_BFT_MINIO_BINARY_PATH is not set. Running in RocksDB mode.")
+            return
+        
+        print("CONCORD_BFT_MINIO_BINARY_PATH is set. Running in S3 mode.")
 
         # We need a temp dir for data and binaries - this is cls.dest_dir
         # self.dest_dir will contain data dir for minio buckets and the minio binary
@@ -109,12 +93,12 @@ class SkvbcReadOnlyReplicaTest(unittest.TestCase):
         cls.minio_server_data_dir = os.path.join(cls.work_dir, "data")
         os.makedirs(os.path.join(cls.work_dir, "data", "blockchain"))     # create all dirs in one call
 
-        log.log_message(message_type=f"Working in {cls.work_dir}")
+        print(f"Working in {cls.work_dir}")
 
         # Start server
         cls._start_s3_server()
         
-        log.log_message(message_type="Initialisation complete")
+        print("Initialisation complete")
 
     @classmethod
     def tearDownClass(cls):
@@ -173,7 +157,7 @@ class SkvbcReadOnlyReplicaTest(unittest.TestCase):
                         else:
                             if lastStableSeqNum >= 150:
                                 #enough requests
-                                log.log_message(message_type="Consensus: lastStableSeqNum:" + str(lastStableSeqNum))
+                                print("Consensus: lastStableSeqNum:" + str(lastStableSeqNum))
                                 nursery.cancel_scope.cancel()
         # start the read-only replica
         ro_replica_id = bft_network.config.n
@@ -189,7 +173,7 @@ class SkvbcReadOnlyReplicaTest(unittest.TestCase):
                     else:
                         # success!
                         if lastExecutedSeqNum >= 150:
-                            log.log_message(message_type="Replica " + str(ro_replica_id) + ": lastExecutedSeqNum:" + str(lastExecutedSeqNum))
+                            print("Replica " + str(ro_replica_id) + ": lastExecutedSeqNum:" + str(lastExecutedSeqNum))
                             break
 
     @with_trio
@@ -223,9 +207,9 @@ class SkvbcReadOnlyReplicaTest(unittest.TestCase):
                         else:
                             # success!
                             if lastExecutedSeqNum >= 150:
-                                log.log_message(message_type="Replica" + str(ro_replica_id) + " : lastExecutedSeqNum:" + str(lastExecutedSeqNum))
+                                print("Replica" + str(ro_replica_id) + " : lastExecutedSeqNum:" + str(lastExecutedSeqNum))
                                 nursery.cancel_scope.cancel()
-
+                                
     @with_trio
     @with_bft_network(start_replica_cmd=start_replica_cmd, num_ro_replicas=1, selected_configs=lambda n, f, c: n == 7)
     async def test_ro_replica_with_late_s3_start(self, bft_network):
@@ -273,6 +257,7 @@ class SkvbcReadOnlyReplicaTest(unittest.TestCase):
         bft_network.start_all_replicas()
         skvbc = kvbc.SimpleKVBCProtocol(bft_network)
 
+        # start the read-only replica while the s3 service is down
         ro_replica_id = bft_network.config.n
         bft_network.start_replica(ro_replica_id)
 
@@ -288,50 +273,7 @@ class SkvbcReadOnlyReplicaTest(unittest.TestCase):
         await self._wait_for_st(bft_network, ro_replica_id)
 
 
-    @with_trio
-    @with_bft_network(start_replica_cmd=start_replica_cmd_prefix, num_ro_replicas=1, selected_configs=lambda n, f, c: n == 7)
-    async def test_ro_replica_with_restart(self, bft_network):
-        """
-        Start all replicas.
-        Wait for State Transfer in ReadOnlyReplica to complete.
-        Restart RO replica.
-        Wait for another state transfer.
-        This test is executed only in S3 mode.
-        """
-        if not os.environ.get("CONCORD_BFT_MINIO_BINARY_PATH"):
-            return
-
-        #self.__class__._clear_s3_storage()
-
-        bft_network.start_all_replicas()
-        skvbc = kvbc.SimpleKVBCProtocol(bft_network)
-
-        ro_replica_id = bft_network.config.n
-        bft_network.start_replica(ro_replica_id)
-
-        await skvbc.fill_and_wait_for_checkpoint(
-            initial_nodes=bft_network.all_replicas(),
-            num_of_checkpoints_to_add=1,
-            verify_checkpoint_persistency=False
-        )
-
-        await self._wait_for_st(bft_network, ro_replica_id)
-
-        bft_network.stop_replica(ro_replica_id)
-        time.sleep(2)
-        bft_network.start_replica(ro_replica_id)
-
-        await skvbc.fill_and_wait_for_checkpoint(
-            initial_nodes=bft_network.all_replicas(),
-            num_of_checkpoints_to_add=1,
-            verify_checkpoint_persistency=False,
-            assert_state_transfer_not_started=False
-        )
-
-        await self._wait_for_st(bft_network, ro_replica_id, 150)
-
-
-    async def _wait_for_st(self, bft_network, ro_replica_id, seqnum_threshold=150):
+    async def _wait_for_st(self, bft_network, ro_replica_id):
         # TODO replace the below function with the library function:
         # await tracker.skvbc.tracked_fill_and_wait_for_checkpoint(
         # initial_nodes=bft_network.all_replicas(),
@@ -347,6 +289,6 @@ class SkvbcReadOnlyReplicaTest(unittest.TestCase):
                         continue
                     else:
                         # success!
-                        if lastExecutedSeqNum >= seqnum_threshold:
-                            log.log_message(message_type="Replica" + str(ro_replica_id) + " : lastExecutedSeqNum:" + str(lastExecutedSeqNum))
+                        if lastExecutedSeqNum >= 150:
+                            print("Replica" + str(ro_replica_id) + " : lastExecutedSeqNum:" + str(lastExecutedSeqNum))
                             break

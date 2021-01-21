@@ -13,7 +13,6 @@
 
 #include <string.h>
 #include <unistd.h>
-#include <exception>
 #include <iostream>
 #include <arpa/inet.h>
 
@@ -25,7 +24,7 @@ namespace concordMetrics {
 void Server::Start() {
   if ((sock_ = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
     LOG_FATAL(logger_, "Error creating UDP socket");
-    std::terminate();
+    exit(1);
   }
 
   struct sockaddr_in servaddr;
@@ -46,7 +45,7 @@ void Server::Start() {
                     << "unknown"
                     << ", Port=" << listenPort_ << ", errno=" << concordUtils::errnoString(errno));
     }
-    std::terminate();
+    exit(1);
   }
 
   running_lock_.lock();
@@ -67,7 +66,7 @@ void Server::Stop() {
   close(sock_);
 
   // Wait for the recvLoop thread to stop
-  if (thread_.joinable()) thread_.join();
+  thread_.join();
 }
 
 void Server::RecvLoop() {
@@ -83,22 +82,11 @@ void Server::RecvLoop() {
     }
     running_lock_.unlock();
 
-    struct timeval timeout;
-    timeout.tv_sec = 5;
-    timeout.tv_usec = 0;
-
-    if (setsockopt(sock_, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(timeout)) < 0) {
-      LOG_ERROR(logger_, "Failed to set socket timeout!" << concordUtils::errnoString(errno));
-    }
-
     socklen_t addrlen = sizeof(cliaddr);
     len = recvfrom(sock_, buf_, MAX_MSG_SIZE, 0, (sockaddr*)&cliaddr, &addrlen);
 
     if (len < 0) {
-      if (errno != EAGAIN) {
-        LOG_ERROR(logger_, "Failed to recv msg: " << concordUtils::errnoString(errno));
-      }
-
+      LOG_ERROR(logger_, "Failed to recv msg: " << concordUtils::errnoString(errno));
       continue;
     }
 
@@ -112,7 +100,7 @@ void Server::RecvLoop() {
 
     if (json.size() > MAX_MSG_SIZE - sizeof(Header)) {
       LOG_FATAL(logger_, "Aggregator data too large to be transmitted!");
-      std::terminate();
+      exit(1);
     }
 
     sendReply(json, &cliaddr, addrlen);

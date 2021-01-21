@@ -24,11 +24,11 @@
 #include "storage/db_types.h"
 #include "string.hpp"
 
-#include <algorithm>
 #include <cstdint>
 #include <iterator>
 #include <limits>
 #include <string>
+
 #include <utility>
 #include <variant>
 #include <vector>
@@ -59,11 +59,6 @@ using BatchedInternalMaskType = std::uint32_t;
 // Serialize integral types in big-endian (network) byte order so that lexicographical comparison works and we can get
 // away without a custom key comparator. toBigEndianStringBuffer() does not allow bools.
 template <typename T>
-void serializeImp(T v, std::string &out) {
-  out += concordUtils::toBigEndianStringBuffer(v);
-}
-
-template <typename T>
 std::string serializeImp(T v) {
   return concordUtils::toBigEndianStringBuffer(v);
 }
@@ -78,117 +73,63 @@ inline std::string serializeImp(storage::v2MerkleTree::detail::EKeySubtype type)
 }
 
 inline std::string serializeImp(storage::v2MerkleTree::detail::EBFTSubtype type) {
-  // NOLINTNEXTLINE(bugprone-narrowing-conversions)
   return std::string{concord::util::toChar(storage::v2MerkleTree::detail::EDBKeyType::BFT),
                      concord::util::toChar(type)};
 }
 
-inline void serializeImp(const sparse_merkle::NibblePath &path, std::string &out) {
-  out.append(1, static_cast<std::uint8_t>(path.length()));
-  out.append(std::cbegin(path.data()), std::cend(path.data()));
+inline std::string serializeImp(const std::vector<std::uint8_t> &v) {
+  return std::string{std::cbegin(v), std::cend(v)};
 }
 
 inline std::string serializeImp(const sparse_merkle::NibblePath &path) {
-  auto out = std::string{};
-  serializeImp(path, out);
-  return out;
-}
-
-inline void serializeImp(const sparse_merkle::Hash &hash, std::string &out) {
-  out.append(reinterpret_cast<const char *>(hash.data()), hash.size());
+  return serializeImp(static_cast<std::uint8_t>(path.length())) + serializeImp(path.data());
 }
 
 inline std::string serializeImp(const sparse_merkle::Hash &hash) {
-  auto out = std::string{};
-  serializeImp(hash, out);
-  return out;
-}
-
-inline void serializeImp(const sparse_merkle::InternalNodeKey &key, std::string &out) {
-  serializeImp(key.version().value(), out);
-  serializeImp(key.path(), out);
+  return std::string{reinterpret_cast<const char *>(hash.data()), hash.size()};
 }
 
 inline std::string serializeImp(const sparse_merkle::InternalNodeKey &key) {
-  auto out = std::string{};
-  serializeImp(key, out);
-  return out;
-}
-
-inline void serializeImp(const sparse_merkle::LeafKey &key, std::string &out) {
-  serializeImp(key.hash(), out);
-  serializeImp(key.version().value(), out);
+  return serializeImp(key.version().value()) + serializeImp(key.path());
 }
 
 inline std::string serializeImp(const sparse_merkle::LeafKey &key) {
-  auto out = std::string{};
-  serializeImp(key, out);
-  return out;
-}
-
-inline void serializeImp(const sparse_merkle::LeafChild &child, std::string &out) {
-  serializeImp(child.hash, out);
-  serializeImp(child.key, out);
+  return serializeImp(key.hash()) + serializeImp(key.version().value());
 }
 
 inline std::string serializeImp(const sparse_merkle::LeafChild &child) {
-  auto out = std::string{};
-  serializeImp(child, out);
-  return out;
-}
-
-inline void serializeImp(const sparse_merkle::InternalChild &child, std::string &out) {
-  serializeImp(child.hash, out);
-  serializeImp(child.version.value(), out);
+  return serializeImp(child.hash) + serializeImp(child.key);
 }
 
 inline std::string serializeImp(const sparse_merkle::InternalChild &child) {
-  auto out = std::string{};
-  serializeImp(child, out);
-  return out;
+  return serializeImp(child.hash) + serializeImp(child.version.value());
 }
 
 inline std::string serializeImp(const sparse_merkle::BatchedInternalNode &intNode) {
   static_assert(sparse_merkle::BatchedInternalNode::MAX_CHILDREN < 32);
 
   struct Visitor {
-    Visitor(std::string &out) : out_{out} {}
+    Visitor(std::string &buf) : buf_{buf} {}
 
     void operator()(const sparse_merkle::LeafChild &leaf) {
-      out_ += concord::util::toChar(BatchedInternalNodeChildType::Leaf);
-      serializeImp(leaf, out_);
+      buf_ += concord::util::toChar(BatchedInternalNodeChildType::Leaf) + serializeImp(leaf);
     }
 
     void operator()(const sparse_merkle::InternalChild &internal) {
-      out_ += concord::util::toChar(BatchedInternalNodeChildType::Internal);
-      serializeImp(internal, out_);
+      buf_ += concord::util::toChar(BatchedInternalNodeChildType::Internal) + serializeImp(internal);
     }
 
-    std::string &out_;
+    std::string &buf_;
   };
 
-  auto mask = BatchedInternalMaskType{0};
-
-  // We assume the largest batched internal node contains 15 internal and 16 leaf children. We then factor in the
-  // mask that indicates which child is set and the single-byte child type bytes serialized for every child.
-  auto out = std::string{};
-  out.reserve((sparse_merkle::InternalChild::SIZE_IN_BYTES * 15) + (sparse_merkle::LeafChild::SIZE_IN_BYTES * 16) +
-              sizeof(mask) + sparse_merkle::BatchedInternalNode::MAX_CHILDREN);
-
   const auto &children = intNode.children();
-
-  // Serialize by first inserting a bitmask of type BatchedInternalMaskType specifying which indexes are set in the
-  // children array. Then, serialize a single byte type before each child and then the child itself - done by the
-  // visitor.
-  //
-  // Start by serializing an empty (all zeroes) mask. Afterwards, overwrite it when the actual mask is calculated. This
-  // allows us to loop once only and avoid shifting the data in the output buffer.
-  std::fill_n(std::back_inserter(out), sizeof(mask), 0);
+  std::string serializedChildren;
+  auto mask = BatchedInternalMaskType{0};
   for (auto i = 0u; i < children.size(); ++i) {
     const auto &child = children[i];
     if (child) {
       mask |= (1 << i);
-      std::visit(Visitor{out}, *child);
+      std::visit(Visitor{serializedChildren}, *child);
     }
   }
 
@@ -197,16 +138,9 @@ inline std::string serializeImp(const sparse_merkle::BatchedInternalNode &intNod
     return std::string{};
   }
 
-  // Set the actual mask in the output.
-  {
-    const auto serializedMask = serializeImp(mask);
-    ConcordAssertEQ(sizeof(mask), serializedMask.size());
-    auto i = 0;
-    for (auto c : serializedMask) {
-      out[i++] = c;
-    }
-  }
-  return out;
+  // Serialize by putting a bitmask (of type BatchedInternalMaskType) specifying which indexes are set in the children
+  // array. Then, put a type before each child and then the child itself.
+  return serializeImp(mask) + serializedChildren;
 }
 
 inline std::string serializeImp(const block::detail::Node &node) {
@@ -245,7 +179,7 @@ inline std::string serializeImp(const block::detail::Node &node) {
   return buf;
 }
 
-inline std::string serializeImp(const block::detail::RawBlockMerkleData &data) {
+inline std::string serializeImp(block::detail::RawBlockMerkleData data) {
   auto dataSize = block::detail::RawBlockMerkleData::MIN_SIZE;
   for (const auto &key : data.deletedKeys) {
     dataSize += (sizeof(block::detail::KeyLengthType) + key.length());
@@ -301,7 +235,6 @@ inline sparse_merkle::Version deserialize<sparse_merkle::Version>(const concordU
 template <>
 inline std::vector<std::uint8_t> deserialize<std::vector<std::uint8_t>>(const concordUtils::Sliver &buf) {
   std::vector<std::uint8_t> vec;
-  vec.reserve(buf.length());
   for (auto i = 0u; i < buf.length(); ++i) {
     vec.push_back(buf[i]);
   }
@@ -311,7 +244,6 @@ inline std::vector<std::uint8_t> deserialize<std::vector<std::uint8_t>>(const co
 template <>
 inline sparse_merkle::NibblePath deserialize<sparse_merkle::NibblePath>(const concordUtils::Sliver &buf) {
   ConcordAssert(buf.length() >= sizeof(std::uint8_t));
-  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   const auto nibbleCount = static_cast<std::size_t>(buf[0]);
   const auto path = deserialize<std::vector<std::uint8_t>>(
       concordUtils::Sliver{buf, sizeof(std::uint8_t), buf.length() - sizeof(std::uint8_t)});

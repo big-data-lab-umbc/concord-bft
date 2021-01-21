@@ -1,7 +1,6 @@
 add_library(concordbft_storage STATIC src/memorydb_client.cpp
                                       src/direct_kv_key_manipulator.cpp
-                                      src/merkle_tree_key_manipulator.cpp
-                                      src/s3/key_manipulator.cpp)
+                                      src/merkle_tree_key_manipulator.cpp)
 
 target_include_directories(concordbft_storage PUBLIC include)
 
@@ -27,7 +26,4 @@ if (BUILD_ROCKSDB_STORAGE)
   target_compile_definitions(concordbft_storage PUBLIC USE_ROCKSDB=1 __BASE=1 SPARSE_STATE=1)
   target_include_directories(concordbft_storage PUBLIC ${ROCKSDB_INCLUDE_DIR})
   target_link_libraries(concordbft_storage PRIVATE ${ROCKSDB} ${LIBBZ2} ${LIBLZ4} ${LIBZSTD} ${LIBZ} ${LIBSNAPPY} ${CMAKE_DL_LIBS})
-
 endif(BUILD_ROCKSDB_STORAGE)
-
-add_subdirectory(test)

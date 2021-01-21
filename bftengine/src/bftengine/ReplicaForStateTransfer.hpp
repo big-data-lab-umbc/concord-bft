@@ -33,7 +33,7 @@ class ReplicaForStateTransfer : public IReplicaForStateTransfer, public ReplicaB
   // IReplicaForStateTransfer
   void freeStateTransferMsg(char* m) override;
   void sendStateTransferMessage(char* m, uint32_t size, uint16_t replicaId) override;
-  void onTransferringComplete(uint64_t checkpointNumberOfNewState) override;
+  void onTransferringComplete(int64_t checkpointNumberOfNewState) override;
   void changeStateTransferTimerPeriod(uint32_t timerPeriodMilli) override;
 
   bool isCollectingState() const { return stateTransfer->isCollectingState(); }
@@ -42,7 +42,7 @@ class ReplicaForStateTransfer : public IReplicaForStateTransfer, public ReplicaB
   void stop() override;
 
  protected:
-  virtual void onTransferringCompleteImp(uint64_t checkpointNumberOfNewState) = 0;
+  virtual void onTransferringCompleteImp(int64_t checkpointNumberOfNewState) = 0;
 
   template <typename T>
   void messageHandler(MessageBase* msg) {
@@ -58,8 +58,8 @@ class ReplicaForStateTransfer : public IReplicaForStateTransfer, public ReplicaB
  protected:
   std::unique_ptr<bftEngine::IStateTransfer> stateTransfer;
   Timers::Handle stateTranTimer_;
-  concordMetrics::CounterHandle metric_received_state_transfers_;
-  concordMetrics::GaugeHandle metric_state_transfer_timer_;
+  CounterHandle metric_received_state_transfers_;
+  GaugeHandle metric_state_transfer_timer_;
   bool firstTime_;
 };
 

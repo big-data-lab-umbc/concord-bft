@@ -44,7 +44,7 @@ void ReplicaForStateTransfer::start() {
   if (firstTime_ || !config_.debugPersistentStorageEnabled)
     stateTransfer->init(kWorkWindowSize / checkpointWindowSize + 1,
                         ReservedPages::totalNumberOfPages(),
-                        ReplicaConfig::instance().getsizeOfReservedPage());
+                        ReplicaConfigSingleton::GetInstance().GetSizeOfReservedPage());
   const std::chrono::milliseconds defaultTimeout = 5s;
   stateTranTimer_ =
       timers_.add(defaultTimeout, Timers::Timer::RECURRING, [this](Timers::Handle h) { stateTransfer->onTimer(); });
@@ -65,8 +65,6 @@ void ReplicaForStateTransfer::onMessage(StateTransferMsg *m) {
   metric_received_state_transfers_.Get().Inc();
   size_t h = sizeof(MessageBase::Header);
   stateTransfer->handleStateTransferMessage(m->body() + h, m->size() - h, m->senderId());
-  m->releaseOwnership();
-  delete m;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -89,10 +87,10 @@ void ReplicaForStateTransfer::sendStateTransferMessage(char *m, uint32_t size, u
   delete p;
 }
 
-void ReplicaForStateTransfer::onTransferringComplete(uint64_t checkpointNumberOfNewState) {
+void ReplicaForStateTransfer::onTransferringComplete(int64_t checkpointNumberOfNewState) {
   // TODO(GG): if this method is invoked by an external thread, then send an "internal message" to the commands
   // processing thread
-  onTransferringCompleteImp(checkpointNumberOfNewState);
+  onTransferringCompleteImp(checkpointNumberOfNewState * checkpointWindowSize);
 }
 
 void ReplicaForStateTransfer::changeStateTransferTimerPeriod(uint32_t timerPeriodMilli) {

@@ -24,7 +24,7 @@
 #include "storage/key_manipulator_interface.h"
 
 namespace bftEngine {
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 namespace impl {
 
 using concord::storage::IDBClient;
@@ -42,12 +42,11 @@ class DBDataStore : public DataStore {
   /**
    * C-r for DBDataStore first time initialization
    */
-  DBDataStore(const concord::storage::IDBClient::ptr& dbc,
+  DBDataStore(concord::storage::IDBClient::ptr dbc,
               uint32_t sizeOfReservedPage,
-              std::shared_ptr<concord::storage::ISTKeyManipulator> keyManip,
-              bool loadResPages)
+              std::shared_ptr<concord::storage::ISTKeyManipulator> keyManip)
       : inmem_(new InMemoryDataStore(sizeOfReservedPage)), dbc_(dbc), keymanip_{keyManip} {
-    load(loadResPages);
+    load();
   }
 
   DataStoreTransaction* beginTransaction() override {
@@ -114,10 +113,6 @@ class DBDataStore : public DataStore {
                   uint32_t copylength) override {
     return inmem_->getResPage(inPageId, inCheckpoint, outActualCheckpoint, outPageDigest, outPage, copylength);
   }
-  void setEraseDataStoreFlag() override { putInt(EraseDataOnStartup, true); }
-
- private:
-  void clearDataStoreData();
 
  protected:
   DBDataStore(const DBDataStore&) = default;
@@ -134,11 +129,10 @@ class DBDataStore : public DataStore {
     FirstRequiredBlock,
     LastRequiredBlock,
     Replicas,
-    CheckpointBeingFetched,
-    EraseDataOnStartup,
+    CheckpointBeingFetched
   };
 
-  void load(bool loadResPages);
+  void load();
   void loadResPages();
   void loadPendingPages();
 
@@ -164,10 +158,10 @@ class DBDataStore : public DataStore {
   void put(const GeneralIds& objId, const Sliver& val) { put(genKey(objId), val); }
   void put(const Sliver& key, const Sliver& val) {
     if (txn_) {
-      LOG_TRACE(logger(), "put objId:" << key.toString() << " val: " << val << " txn: " + txn_->getIdStr());
+      LOG_TRACE(logger(), "put objId:" << key << " val: " << val << " txn: " + txn_->getIdStr());
       txn_->put(key, val);
     } else {
-      LOG_TRACE(logger(), "put objId:" << key.toString() << " val: " << val);
+      LOG_TRACE(logger(), "put objId:" << key << " val: " << val);
       dbc_->put(key, val);
     }
   }
@@ -182,10 +176,10 @@ class DBDataStore : public DataStore {
     if (!(s.isOK() || s.isNotFound()))
       throw std::runtime_error("error get objId: " + key.toString() + std::string(", reason: ") + s.toString());
     if (s.isNotFound()) {
-      LOG_TRACE(logger(), "not found: key: " << key.toString());
+      LOG_TRACE(logger(), "not found: key: " << key);
       return false;
     }
-    LOG_TRACE(logger(), "get objId:" << key.toString() << " val: " << val);
+    LOG_TRACE(logger(), "get objId:" << key << " val: " << val);
     return true;
   }
   /**
@@ -194,12 +188,12 @@ class DBDataStore : public DataStore {
    */
   bool del(GeneralIds objId) { return del(genKey(objId)); }
   bool del(const Sliver& key) {
-    LOG_TRACE(logger(), "delete k.ey:" << key.toString());
+    LOG_TRACE(logger(), "delete k.ey:" << key);
     Status s = dbc_->del(key);
     if (!(s.isOK() || s.isNotFound()))
       throw std::runtime_error("error del key: " + key.toString() + std::string(", reason: ") + s.toString());
     if (s.isNotFound()) {
-      LOG_ERROR(logger(), "not found: key: " << key.toString());
+      LOG_ERROR(logger(), "not found: key: " << key);
       return false;
     }
     return true;
@@ -224,12 +218,16 @@ class DBDataStore : public DataStore {
   Sliver dynamicResPageKey(uint32_t pageid, uint64_t chkpt) const {
     return keymanip_->generateSTReservedPageDynamicKey(pageid, chkpt);
   }
+  Sliver staticResPageKey(uint32_t pageid, uint64_t chkpt) const {
+    static uint64_t maxStored = inmem_->getMaxNumOfStoredCheckpoints();
+    return keymanip_->generateSTReservedPageStaticKey(pageid, chkpt % maxStored + 1);
+  }
   Sliver pendingPageKey(uint32_t pageid) const { return keymanip_->generateSTPendingPageKey(pageid); }
   Sliver chkpDescKey(uint64_t chkpt) const { return keymanip_->generateSTCheckpointDescriptorKey(chkpt); }
   Sliver genKey(const ObjectId& objId) const { return keymanip_->generateStateTransferKey(objId); }
   /** ****************************************************************************************************************/
   logging::Logger& logger() {
-    static logging::Logger logger_ = logging::getLogger("concord.bft.st.dbdatastore");
+    static logging::Logger logger_ = logging::getLogger("bft.st.dbdatastore");
     return logger_;
   }
 
@@ -241,5 +239,5 @@ class DBDataStore : public DataStore {
 };
 
 }  // namespace impl
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 }  // namespace bftEngine

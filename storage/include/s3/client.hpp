@@ -21,7 +21,6 @@
 #include "Logger.hpp"
 #include "assertUtils.hpp"
 #include "storage/db_interface.h"
-#include "s3_metrics.hpp"
 
 #pragma once
 
@@ -34,7 +33,6 @@ struct StoreConfig {
   std::string secretKey;      // from the customer
   std::string accessKey;      // from the customer
   std::uint32_t maxWaitTime;  // in milliseconds
-  std::string pathPrefix;     // optional path prefix used in the bucket
 };
 
 /**
@@ -52,27 +50,19 @@ class Client : public concord::storage::IDBClient {
    public:
     Transaction(Client* client) : ITransaction(nextId()), client_{client} {}
     void commit() override {
-      for (auto& pair : multiput_)
+      for (auto&& pair : multiput_)
         if (concordUtils::Status s = client_->put(pair.first, pair.second); !s.isOK())
-          throw std::runtime_error("S3 commit failed while putting a value for key: " + pair.first.toString() +
-                                   std::string(" txn id[") + getIdStr() + std::string("], reason: ") + s.toString());
-      for (auto& key : keys_to_delete_)
-        if (concordUtils::Status s = client_->del(key); !s.isOK())
-          throw std::runtime_error("S3 commit failed while deleting a vallue for key: " + key.toString() +
-                                   std::string(" txn id[") + getIdStr() + std::string("], reason: ") + s.toString());
+          throw std::runtime_error("S3 client error: commit failed txn id[" + getIdStr() + std::string("], reason: ") +
+                                   s.toString());
     }
     void rollback() override { multiput_.clear(); }
     void put(const concordUtils::Sliver& key, const concordUtils::Sliver& value) override { multiput_[key] = value; }
     std::string get(const concordUtils::Sliver& key) override { return multiput_[key].toString(); }
-    void del(const concordUtils::Sliver& key) override {
-      multiput_.erase(key);
-      keys_to_delete_.insert(key);
-    }
+    void del(const concordUtils::Sliver& key) override { multiput_.erase(key); }
 
    protected:
     Client* client_;
     SetOfKeyValuePairs multiput_;
-    std::set<concordUtils::Sliver> keys_to_delete_;
     ID nextId() {
       static ID id_ = 0;
       return ++id_;
@@ -93,7 +83,7 @@ class Client : public concord::storage::IDBClient {
    *
    * @param name
    */
-  void set_bucket_name(const std::string& name) { config_.bucketName = name; }
+  void set_bucket_name(std::string name) { config_.bucketName = name; }
 
   /**
    * @brief Initializing underlying libs3. The S3_initialize function must be
@@ -115,7 +105,7 @@ class Client : public concord::storage::IDBClient {
     concordUtils::Status res = concordUtils::Status::OK();
     std::function<Status(const concordUtils::Sliver&, OUT concordUtils::Sliver&)> f =
         std::bind(&Client::get_internal, this, _1, _2);
-    do_with_retry("get_internal", res, f, _key, _outValue);
+    do_with_retry(res, f, _key, _outValue);
     return res;
   }
 
@@ -143,7 +133,7 @@ class Client : public concord::storage::IDBClient {
     std::function<Status(const concordUtils::Sliver&, const concordUtils::Sliver&)> f =
         std::bind(&Client::put_internal, this, _1, _2);
     concordUtils::Status res = concordUtils::Status::OK();
-    do_with_retry("put_internal", res, f, _key, _value);
+    do_with_retry(res, f, _key, _value);
     return res;
   }
 
@@ -152,7 +142,7 @@ class Client : public concord::storage::IDBClient {
     std::function<Status()> f = std::bind(&Client::test_bucket_internal, this);
     concordUtils::Status res = concordUtils::Status::OK();
 
-    do_with_retry("test_bucket_internal", res, f);
+    do_with_retry(res, f);
     return res;
   }
 
@@ -160,7 +150,7 @@ class Client : public concord::storage::IDBClient {
     using namespace std::placeholders;
     std::function<Status(const concordUtils::Sliver&)> f = std::bind(&Client::object_exists_internal, this, _1);
     concordUtils::Status res = concordUtils::Status::OK();
-    do_with_retry("object_exists_internal", res, f, key);
+    do_with_retry(res, f, key);
     return res;
   }
 
@@ -206,21 +196,20 @@ class Client : public concord::storage::IDBClient {
   }
 
   void setAggregator(std::shared_ptr<concordMetrics::Aggregator> aggregator) override {
-    metrics_.metrics_component.SetAggregator(aggregator);
-    metrics_.metrics_component.UpdateAggregator();
+    // TODO
   }
 
   ///////////////////////// protected /////////////////////////////
  protected:
   // retry forever, increasing the waiting timeout until it reaches the defined maximum
   template <typename F, typename... Args>
-  void do_with_retry(const std::string_view msg, Status& r, F&& f, Args&&... args) const {
+  void do_with_retry(Status& r, F&& f, Args&&... args) const {
     uint16_t delay = initialDelay_;
     do {
       r = std::forward<F>(f)(std::forward<Args>(args)...);
       if (!r.isGeneralError()) break;
       if (delay < config_.maxWaitTime) delay *= delayFactor_;
-      LOG_INFO(logger_, "retrying " << msg << " after delay: " << delay);
+      LOG_INFO(logger_, "retrying " << typeid(f).name() << " after delay: " << delay);
       std::this_thread::sleep_for(std::chrono::milliseconds(delay));
     } while (!r.isOK() || !r.isNotFound());
   }
@@ -309,8 +298,6 @@ class Client : public concord::storage::IDBClient {
 
   uint16_t initialDelay_ = 100;
   const double delayFactor_ = 1.5;
-
-  Metrics metrics_;
 };
 
 }  // namespace concord::storage::s3

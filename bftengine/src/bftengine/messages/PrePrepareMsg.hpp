@@ -34,7 +34,6 @@ class PrePrepareMsg : public MessageBase {
     ViewNum viewNum;
     SeqNum seqNum;
     uint16_t flags;
-    uint64_t batchCidLength;
     Digest digestOfRequests;
 
     uint16_t numberOfRequests;
@@ -47,7 +46,7 @@ class PrePrepareMsg : public MessageBase {
     // 10 = SLOW) bits 4-15: zero
   };
 #pragma pack(pop)
-  static_assert(sizeof(Header) == (6 + 8 + 8 + 2 + DIGEST_SIZE + 2 + 4 + 8), "Header is 70B");
+  static_assert(sizeof(Header) == (6 + 8 + 8 + 2 + DIGEST_SIZE + 2 + 4), "Header is 62B");
 
   static const size_t prePrepareHeaderPrefix =
       sizeof(Header) - sizeof(Header::numberOfRequests) - sizeof(Header::endLocationOfLastRequest);
@@ -62,26 +61,10 @@ class PrePrepareMsg : public MessageBase {
   // size - total size of all requests that will be added
   PrePrepareMsg(ReplicaId sender, ViewNum v, SeqNum s, CommitPath firstPath, size_t size);
 
-  PrePrepareMsg(ReplicaId sender,
-                ViewNum v,
-                SeqNum s,
-                CommitPath firstPath,
-                const concordUtils::SpanContext& spanContext,
-                size_t size);
-
-  PrePrepareMsg(ReplicaId sender,
-                ViewNum v,
-                SeqNum s,
-                CommitPath firstPath,
-                const concordUtils::SpanContext& spanContext,
-                const std::string& batchCid,
-                size_t size);
-
-  BFTENGINE_GEN_CONSTRUCT_FROM_BASE_MESSAGE(PrePrepareMsg)
+  PrePrepareMsg(
+      ReplicaId sender, ViewNum v, SeqNum s, CommitPath firstPath, const std::string& spanContext, size_t size);
 
   uint32_t remainingSizeForRequests() const;
-
-  uint32_t requestsSize() const;
 
   void addRequest(const char* pRequest, uint32_t requestSize);
 
@@ -92,8 +75,6 @@ class PrePrepareMsg : public MessageBase {
   ViewNum viewNumber() const { return b()->viewNum; }
 
   SeqNum seqNumber() const { return b()->seqNum; }
-
-  std::string getCid() const;
 
   CommitPath firstPath() const;
 
@@ -143,7 +124,7 @@ class RequestsIterator {
 
 template <>
 inline MsgSize maxMessageSize<PrePrepareMsg>() {
-  return ReplicaConfig::instance().getmaxExternalMessageSize() + MessageBase::SPAN_CONTEXT_MAX_SIZE;
+  return ReplicaConfigSingleton::GetInstance().GetMaxExternalMessageSize() + MessageBase::SPAN_CONTEXT_MAX_SIZE;
 }
 
 }  // namespace impl

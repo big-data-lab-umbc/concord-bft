@@ -23,7 +23,6 @@
 #include "InternalReplicaApi.hpp"
 #include "SimpleThreadPool.hpp"
 #include "ReplicaConfig.hpp"
-#include "CryptoManager.hpp"
 
 namespace bftEngine {
 namespace impl {
@@ -38,19 +37,11 @@ PartialProofsSet::PartialProofsSet(InternalReplicaApi* const rep)
       selfPartialCommitProof(nullptr) {
   expectedDigest.makeZero();
   timeOfSelfPartialProof = MinTime;
+  thresholdAccumulatorForFast = nullptr;
+  thresholdAccumulatorForOptimisticFast = nullptr;
 }
 
 PartialProofsSet::~PartialProofsSet() { resetAndFree(); }
-
-void PartialProofsSet::acquire(PartialProofsSet* rhs) {
-  fullCommitProof = rhs->fullCommitProof;
-  rhs->fullCommitProof = nullptr;
-  selfPartialCommitProof = rhs->selfPartialCommitProof;
-  rhs->selfPartialCommitProof = nullptr;
-  participatingReplicasInFast = rhs->participatingReplicasInFast;
-  participatingReplicasInOptimisticFast = rhs->participatingReplicasInOptimisticFast;
-  expectedDigest = rhs->expectedDigest;
-}
 
 void PartialProofsSet::resetAndFree() {
   seqNumber = 0;
@@ -62,7 +53,11 @@ void PartialProofsSet::resetAndFree() {
   participatingReplicasInOptimisticFast.clear();
   expectedDigest.makeZero();
   timeOfSelfPartialProof = MinTime;
+  if (thresholdAccumulatorForFast)
+    thresholdVerifier(CommitPath::FAST_WITH_THRESHOLD)->release(thresholdAccumulatorForFast);
   thresholdAccumulatorForFast = nullptr;
+  if (thresholdAccumulatorForOptimisticFast)
+    thresholdVerifier(CommitPath::OPTIMISTIC_FAST)->release(thresholdAccumulatorForOptimisticFast);
   thresholdAccumulatorForOptimisticFast = nullptr;
 }
 
@@ -195,12 +190,12 @@ FullCommitProofMsg* PartialProofsSet::getFullProof() { return fullCommitProof; }
 class AsynchProofCreationJob : public util::SimpleThreadPool::Job {
  public:
   AsynchProofCreationJob(InternalReplicaApi* myReplica,
-                         std::shared_ptr<IThresholdVerifier> verifier,
-                         std::shared_ptr<IThresholdAccumulator> acc,
+                         IThresholdVerifier* verifier,
+                         IThresholdAccumulator* acc,
                          Digest& expectedDigest,
                          SeqNum seqNumber,
                          ViewNum viewNumber,
-                         const concordUtils::SpanContext& span_context) {
+                         const std::string& span_context) {
     this->me = myReplica;
     this->acc = acc;
     this->expectedDigest = expectedDigest;
@@ -255,16 +250,19 @@ class AsynchProofCreationJob : public util::SimpleThreadPool::Job {
     LOG_DEBUG(GL, "end...");
   }
 
-  virtual void release() { delete this; }
+  virtual void release() {
+    delete acc;
+    delete this;
+  }
 
  private:
   InternalReplicaApi* me;
+  IThresholdAccumulator* acc;
   Digest expectedDigest;
   SeqNum seqNumber;
   ViewNum view;
-  std::shared_ptr<IThresholdAccumulator> acc;
-  std::shared_ptr<IThresholdVerifier> verifier;
-  concordUtils::SpanContext span_context_;
+  IThresholdVerifier* verifier;
+  std::string span_context_;
 };
 
 void PartialProofsSet::tryToCreateFullProof() {
@@ -275,7 +273,7 @@ void PartialProofsSet::tryToCreateFullProof() {
   CommitPath cPath = selfPartialCommitProof->commitPath();
 
   bool ready = false;
-  std::shared_ptr<IThresholdAccumulator> thresholdAccumulator;
+  IThresholdAccumulator* thresholdAccumulator = nullptr;
 
   if (cPath == CommitPath::OPTIMISTIC_FAST) {
     ready = (participatingReplicasInOptimisticFast.size() == (numOfRequiredPartialProofsForOptimisticFast - 1));
@@ -288,48 +286,57 @@ void PartialProofsSet::tryToCreateFullProof() {
   if (!ready) return;
 
   ConcordAssert(thresholdAccumulator != nullptr);
+
   {
+    IThresholdAccumulator* acc = thresholdAccumulator->clone();
+
     PartialCommitProofMsg* myPCP = selfPartialCommitProof;
 
     const auto& span_context = myPCP->spanContext<std::remove_pointer<decltype(myPCP)>::type>();
-    AsynchProofCreationJob* j = new AsynchProofCreationJob(replica,
-                                                           thresholdVerifier(cPath),
-                                                           thresholdAccumulator,
-                                                           expectedDigest,
-                                                           myPCP->seqNumber(),
-                                                           myPCP->viewNumber(),
-                                                           span_context);
+    AsynchProofCreationJob* j = new AsynchProofCreationJob(
+        replica, thresholdVerifier(cPath), acc, expectedDigest, myPCP->seqNumber(), myPCP->viewNumber(), span_context);
 
     replica->getInternalThreadPool().add(j);
 
-    LOG_TRACE(GL, "send to BK thread (for seqNumber " << seqNumber << ")");
+    LOG_DEBUG(GL, "PartialProofsSet - send to BK thread (for seqNumber %" << seqNumber << ")");
   }
 }
 
-std::shared_ptr<IThresholdVerifier> PartialProofsSet::thresholdVerifier(CommitPath cPath) {
+IThresholdVerifier* PartialProofsSet::thresholdVerifier(CommitPath cPath) {
   // TODO: Not thread-safe?
+  IThresholdVerifier* verifier;
+
   // TODO: ALIN: Not sure if the commented code below would be the desired behavior
   if (cPath == CommitPath::OPTIMISTIC_FAST) {
-    return CryptoManager::instance().thresholdVerifierForOptimisticCommit();
+    verifier = replica->getThresholdVerifierForOptimisticCommit();
   } else /* if (cPath == CommitPath::FAST_WITH_THRESHOLD) */ {
-    return CryptoManager::instance().thresholdVerifierForCommit();
+    verifier = replica->getThresholdVerifierForCommit();
+    //} else {
   }
+
+  ConcordAssert(verifier != nullptr);
+
+  return verifier;
 }
 
-std::shared_ptr<IThresholdAccumulator> PartialProofsSet::thresholdAccumulator(CommitPath cPath) {
+IThresholdAccumulator* PartialProofsSet::thresholdAccumulator(CommitPath cPath) {
+  IThresholdAccumulator* acc;
+  IThresholdVerifier* v = thresholdVerifier(cPath);
+
   if (cPath == CommitPath::OPTIMISTIC_FAST) {
-    if (!thresholdAccumulatorForOptimisticFast)
-      thresholdAccumulatorForOptimisticFast.reset(thresholdVerifier(cPath)->newAccumulator(false));
+    if (thresholdAccumulatorForOptimisticFast == nullptr)
+      thresholdAccumulatorForOptimisticFast = v->newAccumulator(false);
 
-    return thresholdAccumulatorForOptimisticFast;
+    acc = thresholdAccumulatorForOptimisticFast;
   } else /*if (cPath == CommitPath::FAST_WITH_THRESHOLD)*/ {
-    if (!thresholdAccumulatorForFast)
-      thresholdAccumulatorForFast.reset(thresholdVerifier(cPath)->newAccumulator(false));
+    if (thresholdAccumulatorForFast == nullptr) thresholdAccumulatorForFast = v->newAccumulator(false);
 
-    return thresholdAccumulatorForFast;
+    acc = thresholdAccumulatorForFast;
     // TODO: ALIN: Not sure if the commented code below would be the desired behavior
     //} else {
   }
+
+  return acc;
 }
 
 }  // namespace impl

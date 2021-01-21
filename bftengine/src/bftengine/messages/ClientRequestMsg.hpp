@@ -36,11 +36,7 @@ class ClientRequestMsg : public MessageBase {
                    const char* request,
                    uint64_t reqTimeoutMilli,
                    const std::string& cid = "",
-                   const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  ClientRequestMsg(NodeIdType sender);
-
-  BFTENGINE_GEN_CONSTRUCT_FROM_BASE_MESSAGE(ClientRequestMsg)
+                   const std::string& spanContext = "");
 
   ClientRequestMsg(ClientRequestMsgHeader* body);
 

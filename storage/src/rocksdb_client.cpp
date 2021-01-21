@@ -18,13 +18,9 @@
 #include <rocksdb/env.h>
 #include <rocksdb/utilities/options_util.h>
 #include <rocksdb/table.h>
-#include <rocksdb/filter_policy.h>
-
-#include <atomic>
-#include <utility>
-
 #include "assertUtils.hpp"
 #include "Logger.hpp"
+#include <atomic>
 
 using concordUtils::Sliver;
 using concordUtils::Status;
@@ -87,32 +83,6 @@ bool Client::isNew() {
   return s.IsNotFound();
 }
 
-void Client::Options::applyOptimizations() {
-  // Setting optimized rocksdb options
-  db_options.enable_pipelined_write = true;
-  db_options.IncreaseParallelism(background_threads);
-  db_options.write_buffer_size = 1024 * 1024 * 512;
-  db_options.max_write_buffer_number = 16;
-  db_options.min_write_buffer_number_to_merge = 4;
-  db_options.max_bytes_for_level_base = (uint64_t)1024 * 1024 * 2048;
-  db_options.target_file_size_base = 1024 * 1024 * 256;
-  db_options.max_background_flushes = 2;
-  db_options.max_background_compactions = 48;
-  db_options.max_subcompactions = 48;
-  db_options.level0_file_num_compaction_trigger = 1;
-  db_options.level0_slowdown_writes_trigger = 48;
-  db_options.level0_stop_writes_trigger = 56;
-  db_options.bytes_per_sync = 1024 * 2048;
-
-  ::rocksdb::BlockBasedTableOptions table_options;
-
-  table_options.block_size = 4 * 4096;
-  table_options.block_cache = ::rocksdb::NewLRUCache(1024 * 1024 * 1024 * 2ul);  // 2GB
-  table_options.filter_policy.reset(::rocksdb::NewBloomFilterPolicy(10, false));
-
-  db_options.table_factory.reset(NewBlockBasedTableFactory(table_options));
-}
-
 /**
  * @brief Opens a RocksDB database connection.
  *
@@ -121,105 +91,77 @@ void Client::Options::applyOptimizations() {
  *
  *  @throw GeneralError in case of error in connection, else OK.
  */
-void Client::initDB(bool readOnly, const std::optional<Options> &userOptions, bool applyOptimizations) {
-  if (initialized_) {
-    return;
-  }
-
-  Options options;
+void Client::init(bool readOnly) {
   ::rocksdb::DB *db;
+  ::rocksdb::Options options;
+  ::rocksdb::TransactionDBOptions txn_options;
   std::vector<::rocksdb::ColumnFamilyDescriptor> cf_descs;
+  ::rocksdb::BlockBasedTableOptions table_options;
 
-  if (userOptions.has_value()) {
-    options = *userOptions;
-    auto cf_names = std::vector<std::string>{};
-    ::rocksdb::DB::ListColumnFamilies(options.db_options, m_dbPath, &cf_names);
-    for (const auto &cf_name : cf_names) {
-      cf_descs.push_back(::rocksdb::ColumnFamilyDescriptor{cf_name, ::rocksdb::ColumnFamilyOptions{}});
-    }
-  } else {
-    // Try to read the stored options configuration file
-    // Note that if we recover, then rocksdb should have its option configuration file stored in the rocksdb directory.
-    // Thus, we don't need to persist our custom configuration file.
-    auto s_opt = ::rocksdb::LoadLatestOptions(m_dbPath, ::rocksdb::Env::Default(), &options.db_options, &cf_descs);
-    if (!s_opt.ok()) {
-      const char kPathSeparator =
+  // Setting default rocksdb options
+  options.enable_pipelined_write = true;
+  options.IncreaseParallelism(background_threads);
+  options.write_buffer_size = 1024 * 1024 * 512;
+  options.max_write_buffer_number = 16;
+  options.min_write_buffer_number_to_merge = 4;
+  options.max_bytes_for_level_base = (uint64_t)1024 * 1024 * 2048;
+  options.target_file_size_base = 1024 * 1024 * 256;
+  options.max_background_flushes = 2;
+  options.max_background_compactions = 48;
+  options.max_subcompactions = 48;
+  options.level0_file_num_compaction_trigger = 1;
+  options.level0_slowdown_writes_trigger = 48;
+  options.level0_stop_writes_trigger = 56;
+  options.bytes_per_sync = 1024 * 2048;
+
+  table_options.block_size = 4 * 4096;
+  options.table_factory.reset(NewBlockBasedTableFactory(table_options));
+
+  // Try to read the stored options configuration file
+  // Note that if we recover, then rocksdb should have its option configuration file stored in the rocksdb directory.
+  // Thus, we don't need to persist our custom configuration file.
+  auto s_opt = ::rocksdb::LoadLatestOptions(m_dbPath, ::rocksdb::Env::Default(), &options, &cf_descs);
+  if (!s_opt.ok()) {
+    const char kPathSeparator =
 #ifdef _WIN32
-          '\\';
+        '\\';
 #else
-          '/';
+        '/';
 #endif
-      // If we couldn't read the stored configuration file, try to read the default configuration file.
-      s_opt = ::rocksdb::LoadOptionsFromFile(m_dbPath + kPathSeparator + default_opt_config_name,
-                                             ::rocksdb::Env::Default(),
-                                             &options.db_options,
-                                             &cf_descs);
-    }
-    if (!s_opt.ok()) {
-      // If we couldn't read the stored configuration and not the default configuration file, then create
-      // one.
-      options.db_options.create_if_missing = true;
-    }
-    options.db_options.sst_file_manager.reset(::rocksdb::NewSstFileManager(::rocksdb::Env::Default()));
-    options.db_options.statistics = ::rocksdb::CreateDBStatistics();
-    options.db_options.statistics->set_stats_level(::rocksdb::StatsLevel::kExceptTimeForMutex);
-
-    // If a comparator is passed, use it. If not, use the default one.
-    if (comparator_) {
-      options.db_options.comparator = comparator_.get();
-    }
+    // If we couldn't read the stored configuration file, try to read the default configuration file.
+    s_opt = ::rocksdb::LoadOptionsFromFile(
+        m_dbPath + kPathSeparator + default_opt_config_name, ::rocksdb::Env::Default(), &options, &cf_descs);
   }
-
-  if (applyOptimizations) {
-    options.applyOptimizations();
+  if (!s_opt.ok()) {
+    // If we couldn't read the stored configuration and not the default configuration file, then create
+    // one.
+    options.create_if_missing = true;
   }
+  options.sst_file_manager.reset(::rocksdb::NewSstFileManager(::rocksdb::Env::Default()));
+  options.statistics = ::rocksdb::CreateDBStatistics();
+  options.statistics->set_stats_level(::rocksdb::StatsLevel::kExceptHistogramOrTimers);
 
+  options.write_buffer_size = 512 << 20;  // set default memtable size to 512mb to improve perf
+
+  // If a comparator is passed, use it. If not, use the default one.
+  if (comparator_) {
+    options.comparator = comparator_.get();
+  }
   ::rocksdb::Status s;
-  auto raw_cf_handles = std::vector<::rocksdb::ColumnFamilyHandle *>{};
-  auto unique_cf_handles = std::map<std::string, CfUniquePtr>{};
-  // Ensure that we always delete column family handles, including error returns from the open calls.
-  const auto raw_to_unique_cf_handles = [this](const auto &raw_cf_handles) {
-    auto ret = std::map<std::string, CfUniquePtr>{};
-    for (auto cf_handle : raw_cf_handles) {
-      ret[cf_handle->GetName()] = CfUniquePtr{cf_handle, CfDeleter{this}};
-    }
-    return ret;
-  };
-  if (cf_descs.empty()) {
-    // Make sure we always get a handle for the default column family. Use the DB options to configure it.
-    cf_descs.push_back(::rocksdb::ColumnFamilyDescriptor{::rocksdb::kDefaultColumnFamilyName, options.db_options});
-  } else if (comparator_) {
-    // Make sure we always set the user-supplied comparator for the default family.
-    for (auto &cf_desc : cf_descs) {
-      if (cf_desc.name == ::rocksdb::kDefaultColumnFamilyName) {
-        cf_desc.options.comparator = comparator_.get();
-      }
-    }
-  }
   if (readOnly) {
-    s = ::rocksdb::DB::OpenForReadOnly(options.db_options, m_dbPath, cf_descs, &raw_cf_handles, &db);
-    unique_cf_handles = raw_to_unique_cf_handles(raw_cf_handles);
+    s = ::rocksdb::DB::OpenForReadOnly(options, m_dbPath, &db);
     if (!s.ok())
       throw std::runtime_error("Failed to open rocksdb database at " + m_dbPath + std::string(" reason: ") +
                                s.ToString());
     dbInstance_.reset(db);
   } else {
-    s = ::rocksdb::TransactionDB::Open(
-        options.db_options, options.txn_options, m_dbPath, cf_descs, &raw_cf_handles, &txn_db_);
-    unique_cf_handles = raw_to_unique_cf_handles(raw_cf_handles);
+    s = ::rocksdb::TransactionDB::Open(options, txn_options, m_dbPath, &txn_db_);
     if (!s.ok())
       throw std::runtime_error("Failed to open rocksdb database at " + m_dbPath + std::string(" reason: ") +
                                s.ToString());
     dbInstance_.reset(txn_db_->GetBaseDB());
   }
-  cf_handles_ = std::move(unique_cf_handles);
-  initialized_ = true;
-  storage_metrics_.setMetricsDataSources(options.db_options.sst_file_manager, options.db_options.statistics);
-}  // namespace rocksdb
-
-void Client::init(bool readOnly) {
-  const auto applyOptimizations = true;
-  initDB(readOnly, std::nullopt, applyOptimizations);
+  storage_metrics_.setMetricsDataSources(options.sst_file_manager, options.statistics);
 }
 
 Status Client::get(const Sliver &_key, OUT std::string &_value) const {
@@ -237,6 +179,7 @@ Status Client::get(const Sliver &_key, OUT std::string &_value) const {
     LOG_DEBUG(logger(), "Failed to get key " << _key << " due to " << s.ToString());
     return Status::GeneralError("Failed to read key");
   }
+  storage_metrics_.tryToUpdateMetrics();
   return Status::OK();
 }
 
@@ -355,6 +298,7 @@ Status Client::put(const Sliver &_key, const Sliver &_value) {
     LOG_ERROR(logger(), "Failed to put key " << _key << ", value " << _value);
     return Status::GeneralError("Failed to put key");
   }
+  storage_metrics_.tryToUpdateMetrics();
   return Status::OK();
 }
 
@@ -377,6 +321,7 @@ Status Client::del(const Sliver &_key) {
     LOG_ERROR(logger(), "Failed to delete key " << _key);
     return Status::GeneralError("Failed to delete key");
   }
+  storage_metrics_.tryToUpdateMetrics();
   return Status::OK();
 }
 
@@ -395,6 +340,7 @@ Status Client::multiGet(const KeysVector &_keysVec, OUT ValuesVector &_valuesVec
     }
     _valuesVec.push_back(Sliver(std::move(values[i])));
   }
+  storage_metrics_.tryToUpdateMetrics();
   return Status::OK();
 }
 
@@ -423,6 +369,7 @@ Status Client::multiPut(const SetOfKeyValuePairs &keyValueMap) {
   }
   Status status = launchBatchJob(batch);
   if (status.isOK()) LOG_DEBUG(logger(), "Successfully put all entries to the database");
+  storage_metrics_.tryToUpdateMetrics();
   return status;
 }
 
@@ -434,6 +381,7 @@ Status Client::multiDel(const KeysVector &_keysVec) {
   }
   Status status = launchBatchJob(batch);
   if (status.isOK()) LOG_DEBUG(logger(), "Successfully deleted entries");
+  storage_metrics_.tryToUpdateMetrics();
   return status;
 }
 
@@ -452,6 +400,7 @@ Status Client::rangeDel(const Sliver &_beginKey, const Sliver &_endKey) {
     return Status::GeneralError("Failed to delete range");
   }
   LOG_TRACE(logger(), "RocksDB successful range delete, begin=" << _beginKey << ", end=" << _endKey);
+  storage_metrics_.tryToUpdateMetrics();
   return Status::OK();
 }
 

@@ -22,7 +22,7 @@
 
 namespace bftEngine {
 
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 
 // A state transfer message
 struct Msg {
@@ -36,7 +36,7 @@ class TestReplica : public IReplicaForStateTransfer {
   ///////////////////////////////////////////////////////////////////////////
   // IReplicaForStateTransfer methods
   ///////////////////////////////////////////////////////////////////////////
-  void onTransferringComplete(uint64_t checkpointNumberOfNewState) override{};
+  void onTransferringComplete(int64_t checkpointNumberOfNewState) override{};
 
   void freeStateTransferMsg(char* m) override {
     char* p = (m - sizeof(bftEngine::impl::MessageBase::Header));
@@ -60,6 +60,6 @@ class TestReplica : public IReplicaForStateTransfer {
   std::vector<Msg> sent_messages_;
 };
 
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 
 }  // namespace bftEngine

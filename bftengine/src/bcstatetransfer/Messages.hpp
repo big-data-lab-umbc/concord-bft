@@ -20,7 +20,7 @@
 #include "Logger.hpp"
 
 namespace bftEngine {
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 namespace impl {
 
 #pragma pack(push, 1)
@@ -54,7 +54,6 @@ struct AskForCheckpointSummariesMsg : public BCStateTranBaseMsg {
 
 struct CheckpointSummaryMsg : public BCStateTranBaseMsg {
   CheckpointSummaryMsg() {
-    // NOLINTNEXTLINE(bugprone-undefined-memory-manipulation)
     memset(this, 0, sizeof(CheckpointSummaryMsg));
     type = MsgType::CheckpointsSummary;
   }
@@ -164,5 +163,5 @@ struct ItemDataMsg : public BCStateTranBaseMsg {
 #pragma pack(pop)
 
 }  // namespace impl
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 }  // namespace bftEngine

@@ -31,41 +31,33 @@ using concord::storage::SetOfKeyValuePairs;
 
 const uint64_t LONG_EXEC_CMD_TIME_IN_SEC = 11;
 
-void InternalCommandsHandler::execute(InternalCommandsHandler::ExecutionRequestsQueue &requests,
-                                      const std::string &batchCid,
-                                      concordUtils::SpanWrapper &parent_span) {
-  for (auto &req : requests) {
-    // ReplicaSpecificInfo is not currently used in the TesterReplica
-    if (req.outExecutionStatus != 1) continue;
-    req.outReplicaSpecificInfoSize = 0;
-    int res;
-    if (req.requestSize < sizeof(SimpleRequest)) {
-      LOG_ERROR(m_logger,
-                "The message is too small: requestSize is " << req.requestSize << ", required size is "
-                                                            << sizeof(SimpleRequest));
-      req.outExecutionStatus = -1;
-      continue;
-    }
-    bool readOnly = req.flags & MsgFlag::READ_ONLY_FLAG;
-    if (readOnly) {
-      res = executeReadOnlyCommand(req.requestSize,
-                                   req.request,
-                                   req.maxReplySize,
-                                   req.outReply,
-                                   req.outActualReplySize,
-                                   req.outReplicaSpecificInfoSize);
-    } else {
-      res = executeWriteCommand(req.requestSize,
-                                req.request,
-                                req.executionSequenceNum,
-                                req.flags,
-                                req.maxReplySize,
-                                req.outReply,
-                                req.outActualReplySize);
-    }
-    if (!res) LOG_ERROR(m_logger, "Command execution failed!");
-    req.outExecutionStatus = res ? 0 : -1;
+int InternalCommandsHandler::execute(uint16_t clientId,
+                                     uint64_t sequenceNum,
+                                     uint8_t flags,
+                                     uint32_t requestSize,
+                                     const char *request,
+                                     uint32_t maxReplySize,
+                                     char *outReply,
+                                     uint32_t &outActualReplySize,
+                                     uint32_t &outActualReplicaSpecificInfoSize,
+                                     concordUtils::SpanWrapper &span) {
+  // ReplicaSpecificInfo is not currently used in the TesterReplica
+  outActualReplicaSpecificInfoSize = 0;
+  int res;
+  if (requestSize < sizeof(SimpleRequest)) {
+    LOG_ERROR(
+        m_logger,
+        "The message is too small: requestSize is " << requestSize << ", required size is " << sizeof(SimpleRequest));
+    return -1;
   }
+  bool readOnly = flags & MsgFlag::READ_ONLY_FLAG;
+  if (readOnly) {
+    res = executeReadOnlyCommand(requestSize, request, maxReplySize, outReply, outActualReplySize);
+  } else {
+    res = executeWriteCommand(requestSize, request, sequenceNum, flags, maxReplySize, outReply, outActualReplySize);
+  }
+  if (!res) LOG_ERROR(m_logger, "Command execution failed!");
+  return res ? 0 : -1;
 }
 
 void InternalCommandsHandler::addMetadataKeyValue(SetOfKeyValuePairs &updates, uint64_t sequenceNum) const {
@@ -118,16 +110,6 @@ bool InternalCommandsHandler::executeWriteCommand(uint32_t requestSize,
                << " READ_ONLY_FLAG=" << ((flags & MsgFlag::READ_ONLY_FLAG) != 0 ? "true" : "false")
                << " PRE_PROCESS_FLAG=" << ((flags & MsgFlag::PRE_PROCESS_FLAG) != 0 ? "true" : "false")
                << " HAS_PRE_PROCESSED_FLAG=" << ((flags & MsgFlag::HAS_PRE_PROCESSED_FLAG) != 0 ? "true" : "false"));
-
-  if (writeReq->header.type == WEDGE) {
-    LOG_INFO(m_logger, "A wedge command has been called" << KVLOG(sequenceNum));
-    controlStateManager_->setStopAtNextCheckpoint(sequenceNum);
-  }
-  if (writeReq->header.type == ADD_REMOVE_NODE) {
-    LOG_INFO(m_logger, "An add_remove_node command has been called" << KVLOG(sequenceNum));
-    controlStateManager_->setStopAtNextCheckpoint(sequenceNum);
-    controlStateManager_->setEraseMetadataFlag(sequenceNum);
-  }
 
   if (!(flags & MsgFlag::HAS_PRE_PROCESSED_FLAG)) {
     bool result = verifyWriteCommand(requestSize, *writeReq, maxReplySize, outReplySize);
@@ -280,29 +262,6 @@ bool InternalCommandsHandler::executeReadCommand(
   return true;
 }
 
-bool InternalCommandsHandler::executeHaveYouStoppedReadCommand(uint32_t requestSize,
-                                                               const char *request,
-                                                               size_t maxReplySize,
-                                                               char *outReply,
-                                                               uint32_t &outReplySize,
-                                                               uint32_t &specificReplicaInfoSize) {
-  auto *readReq = (SimpleHaveYouStoppedRequest *)request;
-  LOG_INFO(m_logger, "Execute HaveYouStopped command: type=" << readReq->header.type);
-
-  specificReplicaInfoSize = sizeof(int64_t);
-  outReplySize = sizeof(SimpleReply);
-  outReplySize += specificReplicaInfoSize;
-  if (maxReplySize < outReplySize) {
-    LOG_ERROR(m_logger, "The message is too small: requestSize=" << requestSize << ", minRequestSize=" << outReplySize);
-    return false;
-  }
-  auto *reply = (SimpleReply_HaveYouStopped *)(outReply);
-  reply->header.type = WEDGE;
-  reply->stopped = controlHandlers_->haveYouStopped(readReq->n_of_n_stop);
-  LOG_INFO(m_logger, "HaveYouStopped message handled");
-  return true;
-}
-
 bool InternalCommandsHandler::executeGetLastBlockCommand(uint32_t requestSize,
                                                          size_t maxReplySize,
                                                          char *outReply,
@@ -332,12 +291,8 @@ bool InternalCommandsHandler::executeGetLastBlockCommand(uint32_t requestSize,
   return true;
 }
 
-bool InternalCommandsHandler::executeReadOnlyCommand(uint32_t requestSize,
-                                                     const char *request,
-                                                     size_t maxReplySize,
-                                                     char *outReply,
-                                                     uint32_t &outReplySize,
-                                                     uint32_t &specificReplicaInfoOutReplySize) {
+bool InternalCommandsHandler::executeReadOnlyCommand(
+    uint32_t requestSize, const char *request, size_t maxReplySize, char *outReply, uint32_t &outReplySize) {
   auto *requestHeader = (SimpleRequest *)request;
   if (requestHeader->type == READ) {
     return executeReadCommand(requestSize, request, maxReplySize, outReply, outReplySize);
@@ -345,9 +300,6 @@ bool InternalCommandsHandler::executeReadOnlyCommand(uint32_t requestSize,
     return executeGetLastBlockCommand(requestSize, maxReplySize, outReply, outReplySize);
   } else if (requestHeader->type == GET_BLOCK_DATA) {
     return executeGetBlockDataCommand(requestSize, request, maxReplySize, outReply, outReplySize);
-  } else if (requestHeader->type == WEDGE) {
-    return executeHaveYouStoppedReadCommand(
-        requestSize, request, maxReplySize, outReply, outReplySize, specificReplicaInfoOutReplySize);
   } else {
     outReplySize = 0;
     LOG_ERROR(m_logger, "Illegal message received: requestHeader->type=" << requestHeader->type);

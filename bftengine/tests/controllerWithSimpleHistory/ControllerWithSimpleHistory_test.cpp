@@ -304,6 +304,9 @@ class ThreshSigMock : public IThresholdSigner {
 
   virtual const IShareSecretKey &getShareSecretKey() { return is; };
   virtual const IShareVerificationKey &getShareVerificationKey() const { return isv; };
+  const std::string getVersion() const { return "v"; }
+  void serializeDataMembers(std::ostream &) const {}
+  void deserializeDataMembers(std::istream &) {}
   const IShareSecretKey &getShareSecretKey() const { return is; }
 };
 
@@ -344,11 +347,12 @@ TEST(ControllerWithSimpleHistory, upgrade_slow_to_optimistic) {
 
   char buf[5] = {'m', 'o', 's', 'h', 'e'};
   Digest d{buf, 5};
+  ThreshSigMock th;
   for (++i; i <= 2 * ControllerWithSimpleHistory::EvaluationPeriod; ++i) {
     cwsh.onSendingPrePrepare((SeqNum)i, CommitPath::OPTIMISTIC_FAST, prePrepareTime);
     changed = cwsh.onNewSeqNumberExecution((SeqNum)i);
     for (auto id : {1, 2, 3}) {
-      auto p = impl::PreparePartialMsg::create(0, i, id, d, std::make_shared<ThreshSigMock>());
+      auto p = impl::PreparePartialMsg::create(0, i, id, d, &th);
       cwsh.onMessage(p);
       delete p;
     }
@@ -403,12 +407,12 @@ TEST(ControllerWithSimpleHistory, upgrade_slow_to_threshold) {
 
   char buf[5] = {'m', 'o', 's', 'h', 'e'};
   Digest d{buf, 5};
-
+  ThreshSigMock th;
   for (++i; i <= 3 * ControllerWithSimpleHistory::EvaluationPeriod; ++i) {
     cwsh.onSendingPrePrepare((SeqNum)i, CommitPath::OPTIMISTIC_FAST, prePrepareTime);
     changed = cwsh.onNewSeqNumberExecution((SeqNum)i);
     for (auto id : {1, 2, 3, 4}) {
-      auto p = impl::PreparePartialMsg::create(0, i, id, d, std::make_shared<ThreshSigMock>());
+      auto p = impl::PreparePartialMsg::create(0, i, id, d, &th);
       cwsh.onMessage(p);
       delete p;
     }

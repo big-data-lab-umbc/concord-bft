@@ -20,11 +20,7 @@ namespace impl {
 
 class NewViewMsg : public MessageBase {
  public:
-  NewViewMsg(ReplicaId senderId,
-             ViewNum newView,
-             const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  BFTENGINE_GEN_CONSTRUCT_FROM_BASE_MESSAGE(NewViewMsg)
+  NewViewMsg(ReplicaId senderId, ViewNum newView, const std::string& spanContext = "");
 
   void addElement(ReplicaId replicaId, Digest& viewChangeDigest);
 
@@ -67,7 +63,7 @@ class NewViewMsg : public MessageBase {
 
 template <>
 inline MsgSize maxMessageSize<NewViewMsg>() {
-  return ReplicaConfig::instance().getmaxExternalMessageSize() + MessageBase::SPAN_CONTEXT_MAX_SIZE;
+  return ReplicaConfigSingleton::GetInstance().GetMaxExternalMessageSize() + MessageBase::SPAN_CONTEXT_MAX_SIZE;
 }
 
 }  // namespace impl

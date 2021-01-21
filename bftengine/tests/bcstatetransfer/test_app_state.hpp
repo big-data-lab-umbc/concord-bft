@@ -23,7 +23,7 @@ const uint32_t kMaxBlockSize = 1024;
 
 namespace bftEngine {
 
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 
 struct Block {
   char block[kMaxBlockSize];
@@ -73,6 +73,6 @@ class TestAppState : public IAppState {
   std::unordered_map<uint64_t, Block> blocks_;
 };
 
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 
 }  // namespace bftEngine

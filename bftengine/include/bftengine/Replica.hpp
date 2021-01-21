@@ -33,8 +33,7 @@ enum MsgFlag : uint8_t {
   READ_ONLY_FLAG = 0x1,
   PRE_PROCESS_FLAG = 0x2,
   HAS_PRE_PROCESSED_FLAG = 0x4,
-  KEY_EXCHANGE_FLAG = 0x8,
-  EMPTY_CLIENT_FLAG = 0x10
+  KEY_EXCHANGE_FLAG = 0x8
 };
 
 // The ControlHandlers is a group of method that enables the userRequestHandler to perform infrastructure
@@ -52,32 +51,21 @@ enum MsgFlag : uint8_t {
 class ControlHandlers {
  public:
   virtual void onSuperStableCheckpoint() = 0;
-  virtual void onStableCheckpoint() = 0;
-  virtual bool onPruningProcess() = 0;
   virtual ~ControlHandlers() {}
 };
 
 class IRequestsHandler {
  public:
-  struct ExecutionRequest {
-    uint16_t clientId = 0;
-    uint64_t executionSequenceNum = 0;
-    uint8_t flags = 0;
-    uint32_t requestSize = 0;
-    const char *request;
-    uint32_t maxReplySize = 0;
-    char *outReply;
-    uint64_t requestSequenceNum = executionSequenceNum;
-    uint32_t outActualReplySize = 0;
-    uint32_t outReplicaSpecificInfoSize = 0;
-    int outExecutionStatus = 1;
-  };
-
-  typedef std::deque<ExecutionRequest> ExecutionRequestsQueue;
-
-  virtual void execute(ExecutionRequestsQueue &requests,
-                       const std::string &batchCid,
-                       concordUtils::SpanWrapper &parent_span) = 0;
+  virtual int execute(uint16_t clientId,
+                      uint64_t sequenceNum,
+                      uint8_t flags,
+                      uint32_t requestSize,
+                      const char *request,
+                      uint32_t maxReplySize,
+                      char *outReply,
+                      uint32_t &outActualReplySize,
+                      uint32_t &outReplicaSpecificInfoSize,
+                      concordUtils::SpanWrapper &parent_span) = 0;
 
   virtual void onFinishExecutingReadWriteRequests() {}
   virtual ~IRequestsHandler() {}
@@ -88,19 +76,13 @@ class IRequestsHandler {
 class IReplica {
  public:
   using IReplicaPtr = std::unique_ptr<IReplica>;
-  static IReplicaPtr createNewReplica(const ReplicaConfig &,
-                                      IRequestsHandler *,
-                                      IStateTransfer *,
-                                      bft::communication::ICommunication *,
-                                      MetadataStorage *);
-  static IReplicaPtr createNewReplica(const ReplicaConfig &,
-                                      IRequestsHandler *,
-                                      IStateTransfer *,
-                                      bft::communication::ICommunication *,
-                                      MetadataStorage *,
-                                      bool &erasedMetadata);
+  static IReplicaPtr createNewReplica(
+      ReplicaConfig *, IRequestsHandler *, IStateTransfer *, bft::communication::ICommunication *, MetadataStorage *);
 
-  static IReplicaPtr createNewRoReplica(const ReplicaConfig &, IStateTransfer *, bft::communication::ICommunication *);
+  static IReplicaPtr createNewRoReplica(ReplicaConfig *,
+                                        IStateTransfer *,
+                                        bft::communication::ICommunication *,
+                                        MetadataStorage *);
 
   virtual ~IReplica() = default;
 

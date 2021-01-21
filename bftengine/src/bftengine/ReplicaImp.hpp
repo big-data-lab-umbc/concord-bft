@@ -31,12 +31,6 @@
 #include "Bitmap.hpp"
 #include "OpenTracing.hpp"
 #include "RequestHandler.h"
-#include "InternalBFTClient.hpp"
-#include "diagnostics.h"
-#include "performance_handler.h"
-#include "RequestsBatchingLogic.hpp"
-#include "ReplicaStatusHandlers.hpp"
-#include "ReplicasAskedToLeaveViewInfo.hpp"
 
 namespace bftEngine::impl {
 
@@ -59,9 +53,6 @@ class PersistentStorage;
 
 using bftEngine::ReplicaConfig;
 using std::shared_ptr;
-using concordMetrics::GaugeHandle;
-using concordMetrics::CounterHandle;
-using concordMetrics::StatusHandle;
 
 class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
  protected:
@@ -107,8 +98,7 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
 
   // bounded log used to store information about SeqNums in the range (lastStableSeqNum,lastStableSeqNum +
   // kWorkWindowSize]
-  typedef SequenceWithActiveWindow<kWorkWindowSize, 1, SeqNum, SeqNumInfo, SeqNumInfo, 1> WindowOfSeqNumInfo;
-  std::shared_ptr<WindowOfSeqNumInfo> mainLog;
+  SequenceWithActiveWindow<kWorkWindowSize, 1, SeqNum, SeqNumInfo, SeqNumInfo>* mainLog = nullptr;
 
   // bounded log used to store information about checkpoints in the range [lastStableSeqNum,lastStableSeqNum +
   // kWorkWindowSize]
@@ -124,10 +114,13 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
 
   // managing information about the clients
   ClientsManager* clientsManager = nullptr;
-  std::shared_ptr<InternalBFTClient> internalBFTClient_;
 
   // buffer used to store replies
   char* replyBuffer = nullptr;
+
+  // variables that are used to heuristically compute the 'optimal' batch size
+  size_t maxNumberOfPendingRequestsInRecentHistory = 0;
+  size_t batchingFactor = 1;
 
   RequestHandler bftRequestsHandler_;
 
@@ -165,8 +158,6 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
 
   SeqNum seqNumToStopAt_ = 0;
 
-  ReplicasAskedToLeaveViewInfo complainedReplicas;
-
   //******** METRICS ************************************
   GaugeHandle metric_view_;
   GaugeHandle metric_last_stable_seq_num_;
@@ -181,14 +172,10 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
   GaugeHandle metric_current_primary_;
   GaugeHandle metric_concurrency_level_;
   GaugeHandle metric_primary_last_used_seq_num_;
-  GaugeHandle metric_on_call_back_of_super_stable_cp_;
-  GaugeHandle metric_sent_replica_asks_to_leave_view_msg_;
-  GaugeHandle metric_bft_batch_size_;
 
   // The first commit path being attempted for a new request.
   StatusHandle metric_first_commit_path_;
 
-  CounterHandle metric_total_committed_sn_;
   CounterHandle metric_slow_path_count_;
   CounterHandle metric_received_internal_msgs_;
   CounterHandle metric_received_client_requests_;
@@ -212,7 +199,6 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
   CounterHandle metric_sent_viewchange_msg_due_to_status_;
   CounterHandle metric_sent_newview_msg_due_to_status_;
   CounterHandle metric_sent_preprepare_msg_due_to_status_;
-  CounterHandle metric_sent_replica_asks_to_leave_view_msg_due_to_status_;
   CounterHandle metric_sent_preprepare_msg_due_to_reqMissingData_;
   CounterHandle metric_sent_startSlowPath_msg_due_to_reqMissingData_;
   CounterHandle metric_sent_partialCommitProof_msg_due_to_reqMissingData_;
@@ -221,12 +207,10 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
   CounterHandle metric_sent_commitPartial_msg_due_to_reqMissingData_;
   CounterHandle metric_sent_commitFull_msg_due_to_reqMissingData_;
   CounterHandle metric_sent_fullCommitProof_msg_due_to_reqMissingData_;
+  CounterHandle metric_not_enough_client_requests_event_;
   CounterHandle metric_total_finished_consensuses_;
   CounterHandle metric_total_slowPath_;
   CounterHandle metric_total_fastPath_;
-  CounterHandle metric_total_slowPath_requests_;
-  CounterHandle metric_total_fastPath_requests_;
-  CounterHandle metric_total_preexec_requests_executed_;
   //*****************************************************
  public:
   ReplicaImp(const ReplicaConfig&,
@@ -255,7 +239,7 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
   shared_ptr<PersistentStorage> getPersistentStorage() const { return ps_; }
   IRequestsHandler* getRequestsHandler() { return &bftRequestsHandler_; }
 
-  void recoverRequests();
+  void processMessages();
 
   // InternalReplicaApi
   bool isCollectingState() const override { return stateTransfer->isCollectingState(); }
@@ -269,16 +253,6 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
   ReqId seqNumberOfLastReplyToClient(NodeIdType clientId) const override {
     return clientsManager->seqNumberOfLastReplyToClient(clientId);
   }
-  bool isClientRequestInProcess(NodeIdType clientId, ReqId reqSeqNum) const override {
-    return !clientsManager->noPendingAndRequestCanBecomePending(clientId, reqSeqNum);
-  }
-  SeqNum getPrimaryLastUsedSeqNum() const override { return primaryLastUsedSeqNum; }
-  uint64_t getRequestsInQueue() const override { return requestsQueueOfPrimary.size(); }
-  SeqNum getLastExecutedSeqNum() const override { return lastExecutedSeqNum; }
-  PrePrepareMsg* buildPrePrepareMessage() override;
-  bool tryToSendPrePrepareMsg(bool batchingLogic = false) override;
-  bool tryToSendPrePrepareMsgBatchByRequestsNum(uint32_t requiredRequestsNum) override;
-  bool tryToSendPrePrepareMsgBatchByOverallSize(uint32_t requiredBatchSizeInBytes) override;
 
  protected:
   ReplicaImp(bool firstTime,
@@ -292,6 +266,7 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
              shared_ptr<MsgHandlersRegistrator>,
              concordUtil::Timers& timers);
 
+  void registerStatusHandlers();
   void registerMsgHandlers();
 
   template <typename T>
@@ -315,17 +290,13 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
 
   // Generate diagnostics status replies
   std::string getReplicaState() const;
+
   template <typename T>
   void onMessage(T* msg);
 
   void onInternalMsg(InternalMessage&& msg);
   void onInternalMsg(FullCommitProofMsg* m);
   void onInternalMsg(GetStatus& msg) const;
-
-  PrePrepareMsg* finishAddingRequestsToPrePrepareMsg(PrePrepareMsg*& prePrepareMsg,
-                                                     uint16_t maxSpaceForReqs,
-                                                     uint32_t requiredRequestsSize,
-                                                     uint32_t requiredRequestsNum);
 
   bool handledByRetransmissionsManager(const ReplicaId sourceReplica,
                                        const ReplicaId destReplica,
@@ -339,41 +310,24 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
                                        bool ignorePreviousAcks = false);
   void sendAckIfNeeded(MessageBase* msg, const NodeIdType sourceNode, const SeqNum seqNum);
 
-  bool checkSendPrePrepareMsgPrerequisites();
+  void tryToSendPrePrepareMsg(bool batchingLogic = false);
 
   void sendPartialProof(SeqNumInfo&);
-
-  ClientRequestMsg* addRequestToPrePrepareMessage(ClientRequestMsg*& nextRequest,
-                                                  PrePrepareMsg& prePrepareMsg,
-                                                  uint16_t maxStorageForRequests);
-
-  PrePrepareMsg* createPrePrepareMessage();
-
-  PrePrepareMsg* buildPrePrepareMessageByRequestsNum(uint32_t requiredRequestsNum);
-
-  PrePrepareMsg* buildPrePrepareMessageByBatchSize(uint32_t requiredBatchSizeInBytes);
-
-  void removeDuplicatedRequestsFromRequestsQueue();
 
   void tryToStartSlowPaths();
 
   void tryToAskForMissingInfo();
 
   void sendPreparePartial(SeqNumInfo&);
-
   void sendCommitPartial(SeqNum);  // TODO(GG): the argument should be a ref to SeqNumInfo
 
   void executeReadOnlyRequest(concordUtils::SpanWrapper& parent_span, ClientRequestMsg* m);
 
-  void executeNextCommittedRequests(concordUtils::SpanWrapper& parent_span,
-                                    SeqNum seqNumber,
-                                    const bool requestMissingInfo = false);
+  void executeNextCommittedRequests(concordUtils::SpanWrapper& parent_span, const bool requestMissingInfo = false);
 
   void executeRequestsInPrePrepareMsg(concordUtils::SpanWrapper& parent_span,
                                       PrePrepareMsg* pp,
                                       bool recoverFromErrorInRequestsExecution = false);
-
-  void executeRequestsAndSendResponses(PrePrepareMsg* pp, Bitmap& requestSet, concordUtils::SpanWrapper& span);
 
   void onSeqNumIsStable(
       SeqNum newStableSeqNum,
@@ -381,8 +335,8 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
       bool oldSeqNum = false  // true IFF sequence number newStableSeqNum+kWorkWindowSize has already been executed
   );
 
-  void onSeqNumIsSuperStable(SeqNum superStableSeqNum);
-  void onTransferringCompleteImp(uint64_t) override;
+  void onSeqNumIsSuperStable(SeqNum newSuperStableSeqNum);
+  void onTransferringCompleteImp(SeqNum) override;
 
   template <typename T>
   bool relevantMsgForActiveView(const T* msg);
@@ -396,13 +350,25 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
 
   void sendCheckpointIfNeeded();
 
-  void tryToGotoNextView();
-
   IncomingMsgsStorage& getIncomingMsgsStorage() override;
 
   virtual util::SimpleThreadPool& getInternalThreadPool() override { return internalThreadPool; }
 
   const ReplicaConfig& getReplicaConfig() const override { return config_; }
+
+  virtual IThresholdVerifier* getThresholdVerifierForExecution() override {
+    return config_.thresholdVerifierForExecution;
+  }
+
+  virtual IThresholdVerifier* getThresholdVerifierForSlowPathCommit() override {
+    return config_.thresholdVerifierForSlowPathCommit;
+  }
+
+  virtual IThresholdVerifier* getThresholdVerifierForCommit() override { return config_.thresholdVerifierForCommit; }
+
+  virtual IThresholdVerifier* getThresholdVerifierForOptimisticCommit() override {
+    return config_.thresholdVerifierForOptimisticCommit;
+  }
 
   virtual const ReplicasInfo& getReplicasInfo() const override { return (*repsInfo); }
 
@@ -411,7 +377,6 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
   void onStatusReportTimer(concordUtil::Timers::Handle);
   void onSlowPathTimer(concordUtil::Timers::Handle);
   void onInfoRequestTimer(concordUtil::Timers::Handle);
-  void onSuperStableCheckpointTimer(concordUtil::Timers::Handle);
 
   // handlers for internal messages
 
@@ -420,7 +385,7 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
                                      ViewNum view,
                                      const char* combinedSig,
                                      uint16_t combinedSigLen,
-                                     const concordUtils::SpanContext& span_context);
+                                     const std::string& span_context);
   void onPrepareVerifyCombinedSigResult(SeqNum seqNumber, ViewNum view, bool isValid);
 
   void onCommitCombinedSigFailed(SeqNum seqNumber, ViewNum view, const std::set<uint16_t>& replicasWithBadSigs);
@@ -428,7 +393,7 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
                                     ViewNum view,
                                     const char* combinedSig,
                                     uint16_t combinedSigLen,
-                                    const concordUtils::SpanContext& span_context);
+                                    const std::string& span_context);
   void onCommitVerifyCombinedSigResult(SeqNum seqNumber, ViewNum view, bool isValid);
 
   void onRetransmissionsProcessingResults(SeqNum relatedLastStableSeqNum,
@@ -437,73 +402,10 @@ class ReplicaImp : public InternalReplicaApi, public ReplicaForStateTransfer {
 
  private:
   void addTimers();
-  void startConsensusProcess(PrePrepareMsg* pp, bool isInternalNoop);
   void startConsensusProcess(PrePrepareMsg* pp);
   void sendInternalNoopPrePrepareMsg(CommitPath firstPath = CommitPath::SLOW);
   void bringTheSystemToCheckpointBySendingNoopCommands(SeqNum seqNumToStopAt, CommitPath firstPath = CommitPath::SLOW);
   bool isSeqNumToStopAt(SeqNum seq_num);
-
-  // 5 years
-  static constexpr int64_t MAX_VALUE_SECONDS = 60 * 60 * 24 * 365 * 5;
-  // 5 Minutes
-  static constexpr int64_t MAX_VALUE_MICROSECONDS = 1000 * 1000 * 60 * 5l;
-  // 60 seconds
-  static constexpr int64_t MAX_VALUE_NANOSECONDS = 1000 * 1000 * 1000 * 60l;
-
-  using Recorder = concord::diagnostics::Recorder;
-  using Unit = concord::diagnostics::Unit;
-
-  struct Recorders {
-    Recorders() {
-      auto& registrar = concord::diagnostics::RegistrarSingleton::getInstance();
-      registrar.perf.registerComponent("replica",
-                                       {send,
-                                        executeReadOnlyRequest,
-                                        executeWriteRequest,
-                                        executeRequestsInPrePrepareMsg,
-                                        numRequestsInPrePrepareMsg,
-                                        requestsQueueOfPrimarySize,
-                                        onSeqNumIsStable,
-                                        onTransferringCompleteImp,
-                                        consensus,
-                                        timeInActiveView,
-                                        timeInStateTransfer,
-                                        checkpointFromCreationToStable});
-    }
-
-    DEFINE_SHARED_RECORDER(send, 1, MAX_VALUE_NANOSECONDS, 3, Unit::NANOSECONDS);
-    DEFINE_SHARED_RECORDER(executeReadOnlyRequest, 1, MAX_VALUE_NANOSECONDS, 3, Unit::NANOSECONDS);
-    DEFINE_SHARED_RECORDER(executeWriteRequest, 1, MAX_VALUE_NANOSECONDS, 3, Unit::NANOSECONDS);
-    DEFINE_SHARED_RECORDER(executeRequestsInPrePrepareMsg, 1, MAX_VALUE_NANOSECONDS, 3, Unit::NANOSECONDS);
-    DEFINE_SHARED_RECORDER(numRequestsInPrePrepareMsg, 1, 2500, 3, Unit::COUNT);
-    DEFINE_SHARED_RECORDER(requestsQueueOfPrimarySize,
-                           1,
-                           // Currently hardcoded to 700 in ReplicaImp.cpp
-                           701,
-                           3,
-                           Unit::COUNT);
-    DEFINE_SHARED_RECORDER(onSeqNumIsStable, 1, MAX_VALUE_NANOSECONDS, 3, Unit::NANOSECONDS);
-    DEFINE_SHARED_RECORDER(onTransferringCompleteImp, 1, MAX_VALUE_NANOSECONDS, 3, Unit::NANOSECONDS);
-
-    // Only updated by the primary
-    DEFINE_SHARED_RECORDER(consensus, 1, MAX_VALUE_MICROSECONDS, 3, Unit::MICROSECONDS);
-
-    DEFINE_SHARED_RECORDER(timeInActiveView, 1, MAX_VALUE_SECONDS, 3, Unit::SECONDS);
-    DEFINE_SHARED_RECORDER(timeInStateTransfer, 1, MAX_VALUE_SECONDS, 3, Unit::SECONDS);
-    DEFINE_SHARED_RECORDER(checkpointFromCreationToStable, 1, MAX_VALUE_SECONDS, 3, Unit::SECONDS);
-  };
-
-  Recorders histograms_;
-
-  // Used to measure the time for each consensus slot to go from pre-prepare to commit at the primary.
-  // Time is recorded in histograms_.consensus
-  concord::diagnostics::AsyncTimeRecorderMap<SeqNum> consensus_times_;
-  concord::diagnostics::AsyncTimeRecorderMap<SeqNum> checkpoint_times_;
-
-  concord::diagnostics::AsyncTimeRecorder<false> time_in_active_view_;
-  concord::diagnostics::AsyncTimeRecorder<false> time_in_state_transfer_;
-  batchingLogic::RequestsBatchingLogic reqBatchingLogic_;
-  ReplicaStatusHandlers replStatusHandlers_;
-};  // namespace bftEngine::impl
+};
 
 }  // namespace bftEngine::impl

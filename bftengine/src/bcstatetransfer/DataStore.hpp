@@ -19,13 +19,12 @@
 #include "assertUtils.hpp"
 #include "storage/db_interface.h"
 #include "STDigest.hpp"
-#include "Logger.hpp"
 
 using std::set;
 using concord::storage::ITransaction;
 
 namespace bftEngine {
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 namespace impl {
 
 class DataStoreTransaction;
@@ -133,15 +132,6 @@ class DataStore : public std::enable_shared_from_this<DataStore> {
       ConcordAssert(numberOfPages > 0);
       return sizeof(ResPagesDescriptor) + (numberOfPages - 1) * sizeof(SingleResPageDesc);
     }
-    std::string toString(const std::string& digest) const {
-      std::ostringstream oss;
-      oss << "\nReserved pages descriptor: #pages: " << std::to_string(numOfPages) << "\n";
-      oss << "digest\t" << digest << "\n";
-      for (uint32_t i = 0; i < numOfPages; ++i)
-        if (d[i].relevantCheckpoint > 0)
-          oss << "[" << d[i].pageId << ":" << d[i].relevantCheckpoint << "]\t" << d[i].pageDigest.toString() << "\n";
-      return oss.str();
-    }
   };
 
   virtual ResPagesDescriptor* getResPagesDescriptor(uint64_t inCheckpoint) = 0;
@@ -167,10 +157,6 @@ class DataStore : public std::enable_shared_from_this<DataStore> {
 
   // Transaction support
   virtual DataStoreTransaction* beginTransaction() = 0;
-
-  // Sometimes we would want to clear the metadata when the state transfer is shutting down (i.e on various
-  // reconfiguration actions)
-  virtual void setEraseDataStoreFlag() = 0;
 };
 
 /** *******************************************************************************************************************
@@ -267,8 +253,6 @@ class DataStoreTransaction : public DataStore, public ITransaction {
   std::string get(const concordUtils::Sliver& key) override { return txn_->get(key); }
   void del(const concordUtils::Sliver& key) override { txn_->del(key); }
 
-  void setEraseDataStoreFlag() override { ds_->setEraseDataStoreFlag(); }
-
  private:
   // You can't begin a transaction from within a transaction. However, since we
   // inherit from DataStore, we must implement this method.
@@ -281,5 +265,5 @@ class DataStoreTransaction : public DataStore, public ITransaction {
 };
 
 }  // namespace impl
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 }  // namespace bftEngine

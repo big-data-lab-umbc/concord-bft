@@ -33,14 +33,26 @@
  * @param config         Replica configuration
  * @param outputFilename Filename to which output corresponds; this may be used
  *                       in giving more descriptive error messages.
- * @param commonSys      Common Cryptosystem with all keys already generated (regular replica).
- *                       Is null for ro replica.
+ * @param execSys        Cryptosystem for consensus on execution results in this
+ *                       deployment, with all keys already generated (regular replica).
+ * @param slowSys        Cryptosystem for consensus on transaction commit order
+ *                       in the slow path for this deployment, with all keys
+ *                       already generated (regular replica).
+ * @param commitSys      Cryptosystem for consensus on transaction commit order
+ *                       in the general path for this deployment, with all keys
+ *                       already generated (regular replica).
+ * @param optSys         Cryptosystem for consensus on transaction commit order
+ *                       in the optimistic fast path for this deployment, with
+ *                       all keys already generated (regular replica).
  */
 void outputReplicaKeyfile(uint16_t numReplicas,
                           uint16_t numRoReplicas,
                           bftEngine::ReplicaConfig& config,
                           const std::string& outputFilename,
-                          Cryptosystem* commonSys = nullptr);
+                          Cryptosystem* execSys = nullptr,
+                          Cryptosystem* slowSys = nullptr,
+                          Cryptosystem* commitSys = nullptr,
+                          Cryptosystem* optSys = nullptr);
 
 /**
  * Read in a keyfile for the current replica that was output with
@@ -65,7 +77,7 @@ void outputReplicaKeyfile(uint16_t numReplicas,
  *         output to config, and false otherwise. Reasons for failure may
  *         include I/O issues or invalid formatting or contents of the keyfile.
  */
-Cryptosystem* inputReplicaKeyfileMultisig(const std::string& inputFilename, bftEngine::ReplicaConfig& config);
+bool inputReplicaKeyfile(const std::string& inputFilename, bftEngine::ReplicaConfig& config);
 
 template <typename T>
 T parse(const std::string& str, const std::string& name) {
@@ -74,7 +86,7 @@ T parse(const std::string& str, const std::string& name) {
   } catch (std::exception& e) {
     std::ostringstream oss;
     oss << "Exception: " << e.what() << " Invalid value  for " << name << ": " << str << " expected range ["
-        << std::numeric_limits<T>::min() << ", " << std::numeric_limits<T>::max() << "]";
+        << std::numeric_limits<T>::min() << ", " << std::numeric_limits<T>::max();
 
     throw std::runtime_error(oss.str());
   }

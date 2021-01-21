@@ -16,16 +16,15 @@
 #include <string>
 #include <set>
 #include <chrono>
-#include <memory>
 
 #include "Metrics.hpp"
 #include "communication/ICommunication.hpp"
 
 namespace bftEngine {
 struct SimpleClientParams {
-  uint16_t clientInitialRetryTimeoutMilli = 150;
-  uint16_t clientMinRetryTimeoutMilli = 50;
-  uint16_t clientMaxRetryTimeoutMilli = 1000;
+  uint64_t clientInitialRetryTimeoutMilli = 150;
+  uint64_t clientMinRetryTimeoutMilli = 50;
+  uint64_t clientMaxRetryTimeoutMilli = 1000;
   uint16_t numberOfStandardDeviationsToTolerate = 2;
   uint16_t samplesPerEvaluation = 32;
   uint16_t samplesUntilReset = 1000;
@@ -35,14 +34,7 @@ struct SimpleClientParams {
 };
 
 // Possible values for 'flags' parameter
-enum ClientMsgFlag : uint8_t {
-  EMPTY_FLAGS_REQ = 0x0,
-  READ_ONLY_REQ = 0x1,
-  PRE_PROCESS_REQ = 0x2,
-  HAS_PRE_PROCESSED_REQ = 0x4,
-  KEY_EXCHANGE_REQ = 0x8,
-  EMPTY_CLIENT_REQ = 0x10
-};
+enum ClientMsgFlag : uint8_t { EMPTY_FLAGS_REQ = 0x0, READ_ONLY_REQ = 0x1, PRE_PROCESS_REQ = 0x2 };
 
 enum OperationResult : int8_t { SUCCESS, NOT_READY, TIMEOUT, BUFFER_TOO_SMALL };
 
@@ -104,7 +96,7 @@ class SimpleClient {
 //     support them.]
 class SeqNumberGeneratorForClientRequests {
  public:
-  static std::unique_ptr<SeqNumberGeneratorForClientRequests> createSeqNumberGeneratorForClientRequests();
+  static SeqNumberGeneratorForClientRequests* createSeqNumberGeneratorForClientRequests();
 
   virtual uint64_t generateUniqueSequenceNumberForRequest() = 0;
 

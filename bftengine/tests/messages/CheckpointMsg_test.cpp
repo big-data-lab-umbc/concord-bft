@@ -22,7 +22,9 @@
 #include "helper.hpp"
 
 TEST(CheckpointMsg, base_methods) {
-  ReplicasInfo replicaInfo(createReplicaConfig(), false, false);
+  auto config = createReplicaConfig();
+  config.singletonFromThis();
+  ReplicasInfo replicaInfo(config, false, false);
   NodeIdType senderId = 1u;
   uint64_t reqSeqNum = 150u;
   char digestContext[DIGEST_SIZE] = "digest_content";
@@ -31,7 +33,7 @@ TEST(CheckpointMsg, base_methods) {
   const std::string correlationId = "correlationId";
   const char rawSpanContext[] = {"span_\0context"};
   const std::string spanContext{rawSpanContext, sizeof(rawSpanContext)};
-  CheckpointMsg msg(senderId, reqSeqNum, digest, isStable, concordUtils::SpanContext{spanContext});
+  CheckpointMsg msg(senderId, reqSeqNum, digest, isStable, spanContext);
   EXPECT_EQ(msg.seqNumber(), reqSeqNum);
   EXPECT_EQ(msg.isStableState(), isStable);
   msg.setStateAsStable();

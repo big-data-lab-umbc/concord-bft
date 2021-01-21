@@ -4,11 +4,9 @@
 # Concord-BFT: a Distributed Trust Infrastructure
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![clang-tidy](https://github.com/vmware/concord-bft/workflows/clang-tidy/badge.svg)](https://github.com/vmware/concord-bft/actions?query=workflow%3Aclang-tidy)  
-[![Build Status](https://github.com/vmware/concord-bft/workflows/Release%20build%20(gcc)/badge.svg)](https://github.com/vmware/concord-bft/actions?query=workflow%3A"Release+build+%28gcc%29")
-[![Build Status](https://github.com/vmware/concord-bft/workflows/Debug%20build%20(gcc)/badge.svg)](https://github.com/vmware/concord-bft/actions?query=workflow%3A"Debug+build+%28gcc%29")  
-[![Build Status](https://github.com/vmware/concord-bft/workflows/Release%20build%20(clang)/badge.svg)](https://github.com/vmware/concord-bft/actions?query=workflow%3A"Release+build+%28clang%29")
-[![Build Status](https://github.com/vmware/concord-bft/workflows/Debug%20build%20(clang)/badge.svg)](https://github.com/vmware/concord-bft/actions?query=workflow%3A"Debug+build+%28clang%29")
+[![Build Status](https://travis-ci.com/vmware/concord-bft.svg?branch=master)](https://travis-ci.com/vmware/concord-bft)
+[![Build Status](https://github.com/vmware/concord-bft/workflows/Build/badge.svg)](https://github.com/vmware/concord-bft/actions?query=workflow%3ABuild)
+[![clang-tidy](https://github.com/vmware/concord-bft/workflows/clang-tidy/badge.svg)](https://github.com/vmware/concord-bft/actions?query=workflow%3Aclang-tidy)
 
 
 
@@ -49,7 +47,7 @@ cd concord-bft
 sudo ./install_deps.sh # Installs all dependencies and 3rd parties
 mkdir build
 cd build
-cmake -DBUILD_ROCKSDB_STORAGE=TRUE ..
+cmake ..
 make
 sudo make test
 ```
@@ -57,7 +55,7 @@ sudo make test
 ### Docker
 
 * Install the latest docker.
-* Optional: [configure docker as non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user).
+* Optional: [configure docker as non-root user](https://docs.docker.com/engine/install/linux-postinstall/#manage-docker-as-a-non-root-user). 
 * Build:
 ```sh
 cd concord-bft
@@ -128,27 +126,10 @@ The python client requires python3(>= 3.5) and trio, which is installed via pip.
 #### Adding a new dependency or tool
 
 The CI builds and runs tests in a docker container. To add a new dependency or tool, follow the steps below:
-
-* Rebase against master
-* In order to add/remove dependencies update the file
-  [install_deps.sh](https://github.com/vmware/concord-bft/blob/master/install_deps.sh)
-* Build a new image: `make build-docker-image`
-* Check image current version in the
-  [Makefile](https://github.com/vmware/concord-bft/blob/master/Makefile#L3)
-* Tag the new image: `docker tag concord-bft:latest concordbft/concord-bft:<version>`,
-  <br>where version is `current version + 1`.
-* Update the version in the Makefile
-* Make sure that Concord-BFT is built and tests pass with the new image: `make
-  stop-c build test`
-* Ask one of the maintainers for a temporary write permission to Docker Hub
-  repository(you need to have a [Docker ID](https://docs.docker.com/docker-id/))
-* Push the image: `docker push concordbft/concord-bft:<version>`
-* Create a PR for the update:
-    * The PR must contain only changes related to the updates in the image
-    * PR's summary has to be similar to `Docker update to version <new version>`
-    * PR's message has to list the changes made in the image content and
-      preferably the reason
-    * Submit the PR
+1. Update the `install_deps.sh` script with the new dependency or tool.
+2. Run `make build-docker-image`. After the image is built, `make` will print the list of steps and files to be updated.
+3. Push the new image to Docker Hub.
+4. Submit the PR using the new image.
 
 Important notes:
 1. Adding dependencies or tools directly to the `Dockerfile` is strongly not recommended because it breaks the native build support.
@@ -216,10 +197,6 @@ signed our contributor license agreement (CLA), our bot will update the issue wh
 questions about the CLA process, please refer to our [FAQ](https://cla.vmware.com/faq). For more detailed information,
 refer to [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## Notes
-The library calls `std::terminate()` when it cannot continue in a safe manner.
-In that way, users can install a handler that does something different than just calling `std::abort()`.
-
 ## Community
 
 
@@ -230,3 +207,4 @@ Request a Slack invitation via <concordbft@gmail.com>.
 ## License
 
 concord-bft is available under the [Apache 2 license](LICENSE).
+

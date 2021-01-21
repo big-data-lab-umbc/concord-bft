@@ -39,7 +39,9 @@ void UnmatchedReplyQueue::clear() {
   msgs_.clear();
 }
 
-void MsgReceiver::onNewMessage(bft::communication::NodeNum source, const char* const message, size_t msg_len) {
+void MsgReceiver::onNewMessage(const bft::communication::NodeNum source,
+                               const char* const message,
+                               const size_t msg_len) {
   auto max_reply_size = max_reply_size_.load();
   if (max_reply_size == 0) {
     // There are no outstanding requests, so any replies are stale.
@@ -66,8 +68,8 @@ void MsgReceiver::onNewMessage(bft::communication::NodeNum source, const char* c
   metadata.primary = ReplicaId{header->currentPrimaryId};
   metadata.seq_num = header->reqSeqNum;
 
-  auto data_len = header->replyLength;
-  const char* start_of_body = message + sizeof(bftEngine::ClientReplyMsgHeader) + header->spanContextSize;
+  auto data_len = header->replyLength - sizeof(bftEngine::ClientReplyMsgHeader);
+  const char* start_of_body = message + sizeof(bftEngine::ClientReplyMsgHeader);
   const char* start_of_rsi = start_of_body + (data_len - header->replicaSpecificInfoLength);
   const char* end_of_rsi = start_of_rsi + header->replicaSpecificInfoLength;
 

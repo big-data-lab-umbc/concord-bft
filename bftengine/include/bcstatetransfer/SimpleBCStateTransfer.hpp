@@ -20,7 +20,6 @@
 
 #include "bftengine/IStateTransfer.hpp"
 #include "Metrics.hpp"
-#include "kvstream.h"
 
 namespace concord {
 namespace storage {
@@ -36,7 +35,7 @@ namespace bftEngine {
 // state is updated by appending blocks at the end of the sequence. The module
 // can also handle a limited amount of arbitrary mutable state (which is
 // represented as a small set of fixed size pages).
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 
 // Each block is required to store the digest of the previous block (this digest
 // is used by the state transfer to safely transfer blocks among the replicas).
@@ -107,48 +106,28 @@ struct Config {
   bool pedanticChecks = false;
   bool isReadOnly = false;
 
-  // sizes
-  uint32_t maxChunkSize = 0;
-  uint16_t maxNumberOfChunksInBatch = 0;
-  uint32_t maxBlockSize = 0;                     // bytes
-  uint32_t maxPendingDataFromSourceReplica = 0;  // Maximal internal buffer size for all ST data, bytes
-  uint32_t maxNumOfReservedPages = 0;
-  uint32_t sizeOfReservedPage = 0;  // bytes
+#if defined USE_COMM_PLAIN_TCP || defined USE_COMM_TLS_TCP
+  uint32_t maxChunkSize = 16384;
+  uint16_t maxNumberOfChunksInBatch = 8;
+#else
+  // maxChunkSize * maxNumberOfChunksInBatch should not exceed 64KB as UDP message size is limited to 64KB.
+  uint32_t maxChunkSize = 2048;
+  uint16_t maxNumberOfChunksInBatch = 32;
+#endif
 
-  // timeouts
-  uint32_t refreshTimerMs = 0;
-  uint32_t checkpointSummariesRetransmissionTimeoutMs = 0;
-  uint32_t maxAcceptableMsgDelayMs = 0;
-  uint32_t sourceReplicaReplacementTimeoutMs = 0;
-  uint32_t fetchRetransmissionTimeoutMs = 0;
-  uint32_t metricsDumpIntervalSec = 0;
+  uint32_t maxBlockSize = 10 * 1024 * 1024;                      // 10MB
+  uint32_t maxPendingDataFromSourceReplica = 256 * 1024 * 1024;  // Maximal internal buffer size for all ST data
+  uint32_t maxNumOfReservedPages = 2048;
+  uint32_t sizeOfReservedPage = 4096;
 
-  // misc
-  bool runInSeparateThread = false;
-  bool enableReservedPages = true;
+  uint32_t refreshTimerMilli = 300;                               // ms
+  uint32_t checkpointSummariesRetransmissionTimeoutMilli = 2500;  // ms
+  uint32_t maxAcceptableMsgDelayMilli = 60000;                    // 1 minute
+  uint32_t sourceReplicaReplacementTimeoutMilli = 5000;           // 5 seconds
+  uint32_t fetchRetransmissionTimeoutMilli = 250;                 // ms
+  std::chrono::seconds metricsDumpIntervalSeconds;                // sec
 };
 
-inline std::ostream &operator<<(std::ostream &os, const Config &c) {
-  os << KVLOG(c.myReplicaId,
-              c.fVal,
-              c.cVal,
-              c.numReplicas,
-              c.pedanticChecks,
-              c.isReadOnly,
-              c.maxChunkSize,
-              c.maxNumberOfChunksInBatch,
-              c.maxBlockSize,
-              c.maxPendingDataFromSourceReplica,
-              c.maxNumOfReservedPages,
-              c.sizeOfReservedPage,
-              c.refreshTimerMs,
-              c.checkpointSummariesRetransmissionTimeoutMs,
-              c.maxAcceptableMsgDelayMs,
-              c.sourceReplicaReplacementTimeoutMs);
-  os << ",";
-  os << KVLOG(c.fetchRetransmissionTimeoutMs, c.metricsDumpIntervalSec, c.runInSeparateThread);
-  return os;
-}
 // creates an instance of the state transfer module.
 
 IStateTransfer *create(const Config &config,
@@ -162,5 +141,5 @@ IStateTransfer *create(const Config &config,
                        std::shared_ptr<concord::storage::ISTKeyManipulator> stKeyManipulator,
                        std::shared_ptr<concordMetrics::Aggregator> aggregator);
 
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 }  // namespace bftEngine

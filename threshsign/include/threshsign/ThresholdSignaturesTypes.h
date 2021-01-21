@@ -35,45 +35,86 @@ class IThresholdSigner;
 class IThresholdVerifier;
 
 /**
+ * Exception thrown when attempting to create or use a cryptosystem with invalid
+ * parameters. This may include an unsupported or unrecognized cryptosystem type
+ * or subtype parameter, subtype parameters inapplicable to the given type
+ * selection, invalid numbers of signers or thresholds, or threshold/number of
+ * signers not supported by the selected type of cryptosystem.
+ */
+class InvalidCryptosystemException : public std::exception {
+ public:
+  /**
+   * Constructor for InvalidCryptosystemException.
+   *
+   * @param what Description of why this exception is being thrown.
+   */
+  explicit InvalidCryptosystemException(const std::string& what) : msg(what){};
+
+  /**
+   * Accessor for the description this exception was constructed with.
+   *
+   * @return The description this exception was constructed with.
+   */
+  virtual const char* what() const noexcept override { return msg.c_str(); }
+
+ private:
+  std::string msg;
+};
+
+/**
+ * Exception thrown when attempting to make an access or use of a cryptosystem
+ * that requires state which has not yet been initialized. This type of
+ * exception exists because the Cryptosystem class is designed with either
+ * generating fresh keys or loading existing ones in mind.
+ */
+class UninitializedCryptosystemException : public std::exception {
+ public:
+  /**
+   * Constructor for UninitializedCryptosystemException.
+   *
+   * @param what Description of why this exception is being thrown.
+   */
+  explicit UninitializedCryptosystemException(const std::string& what) : msg(what){};
+
+  /**
+   * Accessor for the description this exception was constructed with.
+   *
+   * @return The description this exception was constructed with.
+   */
+  virtual const char* what() const noexcept override { return msg.c_str(); }
+
+ private:
+  std::string msg;
+};
+
+/**
  * A class for representing threshold cryptosystems of different types,
  * numbers of signers, and threshold levels.
  */
 class Cryptosystem {
  private:
-  std::string type_{""};
-  std::string subtype_{""};
+  std::string type;
+  std::string subtype;
 
-  uint16_t numSigners_{0};
-  uint16_t threshold_{0};
-  bool forceMultisig_{false};  // is true if  signers == threshold
+  uint16_t numSigners;
+  uint16_t threshold;
+  bool forceMultisig_;  // is true if  signers == threshold
 
   // If only one signer's private key is known and stored in this cryptosystem,
   // this field records that signer's ID; otherwise (if no or all private keys
   // are known to this cryptosystem), this field stores Cryptosystem::NID to
   // represent it is inapplicable.
-  uint16_t signerID_{0};
+  uint16_t signerID;
 
   // Note that 0 is not a valid signer ID because signer IDs are 1-indexed.
   static const uint16_t NID = 0;
 
-  std::string publicKey_{""};
-  std::vector<std::string> verificationKeys_;
-  std::vector<std::string> privateKeys_;
+  std::string publicKey;
+  std::vector<std::string> verificationKeys;
+  std::vector<std::string> privateKeys;
 
   // Internally used helper functions.
   IThresholdFactory* createThresholdFactory();
-
-  void validatePublicKey(const std::string& key) const;
-  void validateVerificationKey(const std::string& key) const;
-  void validatePrivateKey(const std::string& key) const;
-  bool isValidCryptosystemSelection(const std::string& type, const std::string& subtype);
-  bool isValidCryptosystemSelection(const std::string& type,
-                                    const std::string& subtype,
-                                    uint16_t numSigners,
-                                    uint16_t threshold);
-
- protected:
-  Cryptosystem() = default;
 
  public:
   /**
@@ -96,7 +137,7 @@ class Cryptosystem {
    *                      individual signers to produce a complete signature
    *                      under this cryptosystem.
    *
-   * @throws std::runtime_error           If sysType is unrecognized or
+   * @throws InvalidCryptosystemException If sysType is unrecognized or
    *                                      unsupported, if sysSubtype is
    *                                      invalid, unrecognized, or unsupported
    *                                      for the type of cryptosystem
@@ -124,28 +165,28 @@ class Cryptosystem {
    *
    * @return A string representing the type of this cryptosystem.
    */
-  const std::string& getType() const { return type_; }
+  const std::string& getType() const { return type; }
 
   /**
    * Get the type-dependent subtype of this crytposystem.
    *
    * @return A string representing the subtype of this cryptosystem.
    */
-  const std::string& getSubtype() const { return subtype_; }
+  const std::string& getSubtype() const { return subtype; }
 
   /**
    * Get the number of signers in this cryptosystem.
    *
    * @return The number of signers in this cryptosystem.
    */
-  uint16_t getNumSigners() const { return numSigners_; }
+  uint16_t getNumSigners() const { return numSigners; }
 
   /**
    * Get the threshold for this threshold cryptosystem.
    *
    * @return The threshold for this cryptosystem.
    */
-  uint16_t getThreshold() const { return threshold_; }
+  uint16_t getThreshold() const { return threshold; }
 
   /**
    * Pseudorandomly generate a complete set of keys for this cryptosystem and
@@ -158,19 +199,12 @@ class Cryptosystem {
   void generateNewPseudorandomKeys();
 
   /**
-   *  Generate a single key pair.
-   *  Used for key rotation.
-   *
-   *  @return pair<shareSecretKey, shareVerificationKey>
-   */
-  std::pair<std::string, std::string> generateNewKeyPair();
-  /**
    * Get the public key for this threshold cryptosystem, represented as a
    * string. The format of the string is cryptosystem type-dependent.
    *
    * @return The public key for this threshold cryptosystem.
    *
-   * @throws std::runtime_error                 If this cryptosystem does not
+   * @throws UninitializedCryptosystemException If this cryptosystem does not
    *                                            currently have a public key
    *                                            because keys for it have not
    *                                            been either generated or
@@ -187,7 +221,7 @@ class Cryptosystem {
    *         signer IDs, verification keys will begin at index 1 of the vector.
    *         The contents of index 0 of the vector is left undefined.
    *
-   * @throws std::runtime_error                 If this cryptosystem does not
+   * @throws UninitializedCryptosystemException If this cryptosystem does not
    *                                            currently have verification
    *                                            keys because keys for it have
    *                                            not been either generated or
@@ -204,7 +238,7 @@ class Cryptosystem {
    *         IDs, the private keys will begin at index 1 of the vector. The
    *         contents of index 0 are left undefined.
    *
-   * @throws std::runtime_error If this cryptosystem does not
+   * @throws UninitializedCryptosystemException If this cryptosystem does not
    *                                            currently have private keys
    *                                            because keys for it have not
    *                                            been generated and private keys
@@ -221,7 +255,7 @@ class Cryptosystem {
    *
    * @return The private key for the specified signer.
    *
-   * @throws std::runtime_error If this cryptosystem does not
+   * @throws UninitializedCryptosystemException If this cryptosystem does not
    *                                            currently have the private key
    *                                            for the specified replica
    *                                            because it has not been
@@ -245,7 +279,7 @@ class Cryptosystem {
    *                         vector. The content at index 0 of the vector will
    *                         not be used by this function.
    *
-   * @throws std::runtime_error If the set of keys given is not valid
+   * @throws InvalidCryptosystemException If the set of keys given is not valid
    *                                      for this cryptosystem.
    */
   void loadKeys(const std::string& publicKey, const std::vector<std::string>& verificationKeys);
@@ -259,7 +293,7 @@ class Cryptosystem {
    *                    [1, numSigners].
    * @param key         The private key to load belonging to this signer.
    *
-   * @throws std::runtime_error If the given private key is invalid.
+   * @throws InvalidCryptosystemException If the given private key is invalid.
    * @throws std::out_of_range            If signerID is not in the range
    *                                      [1, numReplicas].
    */
@@ -268,16 +302,15 @@ class Cryptosystem {
   /**
    * Create a threshod verifier for this cryptosystem.
    *
-   * @param threshold required threshold for multisig scheme
    * @return A pointer to a newly created IThresholdVerifier object for this
    *         cryptosystem.
    *
-   * @throws std::runtime_error If this cryptosystem does not
+   * @throws UninitializedCryptosystemException If this cryptosystem does not
    *                                            have the required public and
    *                                            verification keys loaded to
    *                                            create a verifier.
    */
-  virtual IThresholdVerifier* createThresholdVerifier(uint16_t threshold = 0);
+  IThresholdVerifier* createThresholdVerifier();
 
   /**
    * Create a threshold signer with the private key loaded for this system.
@@ -287,11 +320,77 @@ class Cryptosystem {
    * @return A pointer to a newly created IThresholdSigner object with the
    *         private key loaded to this cryptosystem.
    *
-   * @throws std::runtime_error If this cryptosystem does not
+   * @throws UninitializedCryptosystemException If this cryptosystem does not
    *                                            have a private key loaded, or if
    *                                            it has all private keys loaded.
    */
-  virtual IThresholdSigner* createThresholdSigner();
+  IThresholdSigner* createThresholdSigner();
+
+  /**
+   * Check whether a given string represents a valid public key under this
+   * cryptosystem.
+   *
+   * @param key The string to check the validity of as a public key.
+   *
+   * @return True if this string represents a valid public key under this
+   *         cryptosystem, false otherwise.
+   */
+  bool isValidPublicKey(const std::string& key) const;
+
+  /**
+   * Check whether a given string represents a valid verification key under this
+   * cryptosystem.
+   *
+   * @param key The string to check the validity of as a verification key.
+   *
+   * @return True if this string represents a valid verification key under this
+   *         cryptosystem, false otherwise.
+   */
+  bool isValidVerificationKey(const std::string& key) const;
+
+  /**
+   * Check whether a given string represents a valid private key under this
+   * cryptosystem.
+   *
+   * @param key The string to check the validity of as a private key.
+   *
+   * @return True if this string represents a valid private key under this
+   *         cryptosystem, false otherwise.
+   */
+  bool isValidPrivateKey(const std::string& key) const;
+
+  /**
+   * Check whether a given selection of cryptosystem type and subtype is
+   * recognized and supported.
+   *
+   * @param type    The type of cryptosystem to check.
+   * @param subtype A type-dependent subtype selection to check.
+   *
+   * @return True if this combination of type and subtype is recognized and
+   *         supported, false otherwise.
+   */
+  static bool isValidCryptosystemSelection(const std::string& type, const std::string& subtype);
+
+  /**
+   * Check whether a given selection of cryptosystem type and subtype is
+   * recognized and whether it supports the given number of signers and
+   * threshold.
+   *
+   * @param type       The type of cryptosystem to check.
+   * @param subtype    A type-dependent subtype selection to check.
+   * @param numSigners A number of signers to check support for under the given
+   *                   cryptosystem type and subtype.
+   * @param threshold  A threshold to check support for under the given
+   *                   cryptosystem type, subtype and number of signers.
+   *
+   * @return True if this combination of type and subtype is recognized and
+   *         supported, and it supports the given combination of number of
+   *         signers and threshold, false otherwise.
+   */
+  static bool isValidCryptosystemSelection(const std::string& type,
+                                           const std::string& subtype,
+                                           uint16_t numSigners,
+                                           uint16_t threshold);
 
   /**
    * Get a list of supported cryptosystem types and descriptions of what
@@ -304,28 +403,4 @@ class Cryptosystem {
    *            specifies for that cryptosytem type.
    */
   static void getAvailableCryptosystemTypes(std::vector<std::pair<std::string, std::string>>& ret);
-  /**
-   * Output configuration to stream
-   */
-  void writeConfiguration(std::ostream&, const std::string& prefix, const uint16_t& replicaId);
-  /**
-   * Create Cryptosystem from configuration
-   */
-  static Cryptosystem* fromConfiguration(std::istream&,
-                                         const std::string& prefix,
-                                         const uint16_t& replicaId,
-                                         std::string& type,
-                                         std::string& subtype,
-                                         std::string& thrPrivateKey,
-                                         std::string& thrPublicKey,
-                                         std::vector<std::string>& thrVerificationKeys);
-  /**
-   * Update a key pair
-   */
-  void updateKeys(const std::string& shareSecretKey, const std::string& shareVerificationKey);
-
-  /**
-   * Update a shareVerificationKey for signer
-   */
-  void updateVerificationKey(const std::string& shareVerificationKey, const std::uint16_t& signerIndex);
 };

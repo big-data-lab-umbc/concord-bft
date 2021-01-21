@@ -15,8 +15,7 @@
 
 namespace bftEngine {
 namespace impl {
-namespace {
-constexpr uint8_t powersOf2[] = {
+static uint8_t powersOf2[] = {
     0x1,
     0x2,
     0x4,
@@ -27,26 +26,18 @@ constexpr uint8_t powersOf2[] = {
     0x80,
 };
 
-constexpr int kWorkWindowBitMaskSize = (kWorkWindowSize + 7) / 8;
-constexpr int maxNumberOfReplicasBitMaskSize = (MaxNumberOfReplicas + 7) / 8;
-
-}  // namespace
-
 // TODO(GG): here we assume that replica Ids are between 0 and MaxNumberOfReplicas-1 (should be changed to support
 // dynamic reconfiguration)
 
-MsgSize ReplicaStatusMsg::calcSizeOfReplicaStatusMsg(bool viewIsActive,
-                                                     bool listOfPrePrepareMsgsInActiveWindow,
+MsgSize ReplicaStatusMsg::calcSizeOfReplicaStatusMsg(bool listOfPrePrepareMsgsInActiveWindow,
                                                      bool listOfMissingViewChangeMsgForViewChange,
                                                      bool listOfMissingPrePrepareMsgForViewChange) {
-  if (listOfPrePrepareMsgsInActiveWindow && viewIsActive)
-    return sizeof(ReplicaStatusMsg::Header) + kWorkWindowBitMaskSize + maxNumberOfReplicasBitMaskSize;
-  else if (viewIsActive)
-    return sizeof(ReplicaStatusMsg::Header) + maxNumberOfReplicasBitMaskSize;
+  if (listOfPrePrepareMsgsInActiveWindow)
+    return sizeof(ReplicaStatusMsg::Header) + (kWorkWindowSize + 7) / 8;
   else if (listOfMissingViewChangeMsgForViewChange)
-    return sizeof(ReplicaStatusMsg::Header) + maxNumberOfReplicasBitMaskSize;
+    return sizeof(ReplicaStatusMsg::Header) + (MaxNumberOfReplicas + 7) / 8;
   else if (listOfMissingPrePrepareMsgForViewChange)
-    return sizeof(ReplicaStatusMsg::Header) + kWorkWindowBitMaskSize;
+    return sizeof(ReplicaStatusMsg::Header) + (kWorkWindowSize + 7) / 8;
   else
     return sizeof(ReplicaStatusMsg::Header);
 }
@@ -60,12 +51,11 @@ ReplicaStatusMsg::ReplicaStatusMsg(ReplicaId senderId,
                                    bool listOfPPInActiveWindow,
                                    bool listOfMissingVCForVC,
                                    bool listOfMissingPPForVC,
-                                   const concordUtils::SpanContext& spanContext)
+                                   const std::string& spanContext)
     : MessageBase(senderId,
                   MsgCode::ReplicaStatus,
-                  spanContext.data().size(),
-                  calcSizeOfReplicaStatusMsg(
-                      viewIsActive, listOfPPInActiveWindow, listOfMissingVCForVC, listOfMissingPPForVC)) {
+                  spanContext.size(),
+                  calcSizeOfReplicaStatusMsg(listOfPPInActiveWindow, listOfMissingVCForVC, listOfMissingPPForVC)) {
   ConcordAssert(lastExecutedSeqNum >= lastStableSeqNum);
   ConcordAssert(lastStableSeqNum % checkpointWindowSize == 0);
   ConcordAssert(!viewIsActive || hasNewChangeMsg);         // viewIsActive --> hasNewChangeMsg
@@ -89,7 +79,7 @@ ReplicaStatusMsg::ReplicaStatusMsg(ReplicaId senderId,
   } else if (listOfMissingPPForVC) {
     b()->flags |= powersOf2[4];
   }
-  std::memcpy(body() + sizeof(ReplicaStatusMsg::Header), spanContext.data().data(), spanContext.data().size());
+  std::memcpy(body() + sizeof(ReplicaStatusMsg::Header), spanContext.data(), spanContext.size());
   if (size() > sizeof(ReplicaStatusMsg::Header) + spanContextSize()) {
     // write zero to all bits in list
     MsgSize listSize = size() - payloadShift();
@@ -115,9 +105,8 @@ void ReplicaStatusMsg::validate(const ReplicasInfo& repInfo) const {
       !(!viewIsActive || !listOfMissingPPForVC) ||   // if NOT (viewIsActive --> !listOfMissingPPForVC)
       !(viewIsActive || !listOfPPInActiveWindow) ||  // if NOT (!viewIsActive --> !listOfPPInActiveWindow)
       (((listOfPPInActiveWindow ? 1 : 0) + (listOfMissingVCForVC ? 1 : 0) + (listOfMissingPPForVC ? 1 : 0)) >= 2) ||
-      size() !=
-          calcSizeOfReplicaStatusMsg(viewIsActive, listOfPPInActiveWindow, listOfMissingVCForVC, listOfMissingPPForVC) +
-              spanContextSize())
+      size() != calcSizeOfReplicaStatusMsg(listOfPPInActiveWindow, listOfMissingVCForVC, listOfMissingPPForVC) +
+                    spanContextSize())
     throw std::runtime_error(__PRETTY_FUNCTION__ + std::string(": advanced"));
 }
 
@@ -201,36 +190,6 @@ void ReplicaStatusMsg::setMissingPrePrepareMsgForViewChange(SeqNum seqNum) {
   size_t byteIndex = index / 8;
   size_t bitIndex = index % 8;
   uint8_t* p = (uint8_t*)body() + payloadShift();
-  p[byteIndex] = p[byteIndex] | powersOf2[bitIndex];
-}
-
-bool ReplicaStatusMsg::hasComplaintFromReplica(ReplicaId replicaId) const {
-  ConcordAssert(replicaId < MaxNumberOfReplicas);
-
-  auto shift = payloadShift();
-  if (hasListOfPrePrepareMsgsInActiveWindow()) {
-    shift += kWorkWindowBitMaskSize;
-  }
-
-  size_t index = replicaId;
-  size_t byteIndex = index / 8;
-  size_t bitIndex = index % 8;
-  uint8_t* p = (uint8_t*)body() + shift;
-  return ((p[byteIndex] & powersOf2[bitIndex]) != 0);
-}
-
-void ReplicaStatusMsg::setComplaintFromReplica(ReplicaId replicaId) {
-  ConcordAssert(replicaId < MaxNumberOfReplicas);
-
-  auto shift = payloadShift();
-  if (hasListOfPrePrepareMsgsInActiveWindow()) {
-    shift += kWorkWindowBitMaskSize;
-  }
-
-  size_t index = replicaId;
-  size_t byteIndex = index / 8;
-  size_t bitIndex = index % 8;
-  uint8_t* p = (uint8_t*)body() + shift;
   p[byteIndex] = p[byteIndex] | powersOf2[bitIndex];
 }
 

@@ -19,7 +19,7 @@
 #include <vector>
 
 #include "assertUtils.hpp"
-#include "sha_hash.hpp"
+#include "sha3_256.h"
 
 namespace concord {
 namespace kvbc {
@@ -79,10 +79,8 @@ class Nibble {
   // Return the nibble as its lowercase hex character.
   char hexChar() const {
     if (data_ >= 0 && data_ <= 9) {
-      // NOLINTNEXTLINE(bugprone-narrowing-conversions)
       return '0' + data_;
     }
-    // NOLINTNEXTLINE(bugprone-narrowing-conversions)
     return 'a' + (data_ - 10);
   }
 
@@ -328,9 +326,6 @@ class NibblePath {
 
   // Return the internal representation of the path.
   const std::vector<uint8_t>& data() const { return path_; }
-
-  // Allow moving the data out of the path.
-  std::vector<uint8_t> move_data() { return std::move(path_); }
 
  private:
   size_t num_nibbles_;

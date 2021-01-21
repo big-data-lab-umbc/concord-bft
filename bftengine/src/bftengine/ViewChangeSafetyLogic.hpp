@@ -13,7 +13,6 @@
 
 #include "messages/ViewChangeMsg.hpp"
 #include <vector>
-#include "threshsign/IThresholdVerifier.h"
 
 using std::vector;
 
@@ -27,7 +26,7 @@ class ViewChangeSafetyLogic {
   ViewChangeSafetyLogic(const uint16_t n,
                         const uint16_t f,
                         const uint16_t c,
-                        std::shared_ptr<IThresholdVerifier> preparedCertificateVerifier,
+                        IThresholdVerifier* const preparedCertificateVerifier,
                         const Digest& digestOfNull);
 
   struct Restriction {
@@ -41,8 +40,7 @@ class ViewChangeSafetyLogic {
                            const SeqNum inLBStableForView,
                            SeqNum& outMinRestrictedSeqNum,
                            SeqNum& outMaxRestrictedSeqNum,
-                           Restriction* outSafetyRestrictionsArray,
-                           std::shared_ptr<IThresholdVerifier> ver) const;
+                           Restriction* outSafetyRestrictionsArray) const;
   // Notes about outSafetyRestrictionsArray:
   // - It should have kWorkWindowSize elements.
   // - If at the end of this method outMaxRestrictedSeqNum==0, then outSafetyRestrictionsArray is 'empty'
@@ -53,14 +51,13 @@ class ViewChangeSafetyLogic {
   bool computeRestrictionsForSeqNum(SeqNum s,
                                     vector<ViewChangeMsg::ElementsIterator*>& VCIterators,
                                     const SeqNum upperBound,
-                                    Digest& outRestrictedDigest,
-                                    std::shared_ptr<IThresholdVerifier> ver) const;
+                                    Digest& outRestrictedDigest) const;
 
   const uint16_t N;  // number of replicas
   const uint16_t F;
   const uint16_t C;
 
-  std::shared_ptr<IThresholdVerifier> preparedCertVerifier;
+  IThresholdVerifier* const preparedCertVerifier;
 
   const Digest nullDigest;
 };

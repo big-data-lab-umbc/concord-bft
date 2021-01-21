@@ -27,14 +27,15 @@ using namespace bftEngine;
 using namespace bftEngine::impl;
 
 TEST(ReqMissingDataMsg, base_methods) {
-  ReplicasInfo replicaInfo(createReplicaConfig(), false, false);
+  auto config = createReplicaConfig();
+  ReplicasInfo replicaInfo(config, false, false);
   ReplicaId senderId = 1u;
   ViewNum viewNum = 2u;
   SeqNum seqNum = 3u;
   const char rawSpanContext[] = {"span_\0context"};
   const std::string spanContext{rawSpanContext, sizeof(rawSpanContext)};
   Digest tmpDigest;
-  ReqMissingDataMsg msg(senderId, viewNum, seqNum, concordUtils::SpanContext{spanContext});
+  ReqMissingDataMsg msg(senderId, viewNum, seqNum, spanContext);
   EXPECT_EQ(msg.viewNumber(), viewNum);
   EXPECT_EQ(msg.seqNumber(), seqNum);
   EXPECT_EQ(msg.getFlags(), 0);

@@ -38,21 +38,8 @@ void Client::init(bool readOnly) {
   std::lock_guard<std::mutex> g(initLock_);
   ConcordAssert(!init_);  // we may return here instead of firing assert failure, but
                           // probably we want to catch bugs?
-
-  // protocol is provided by the user and can be in any case
-  std::string s3_protocol;
-  for (auto& c : config_.protocol) s3_protocol.push_back(tolower(c));
-
   context_.hostName = config_.url.c_str();
-  if (s3_protocol == "http") {
-    context_.protocol = S3ProtocolHTTP;
-  } else if (s3_protocol == "https") {
-    context_.protocol = S3ProtocolHTTPS;
-  } else {
-    LOG_FATAL(logger_, "Invalid protocol: " + s3_protocol + ". Supported values are http or https (case insensitive).");
-    ConcordAssert("Invalid S3 protocol" && false);
-  }
-
+  context_.protocol = (config_.protocol == "HTTP" ? S3ProtocolHTTP : S3ProtocolHTTPS);
   context_.uriStyle = S3UriStylePath;
   /* In ECS terms, this is your object user */
   context_.accessKeyId = config_.accessKey.c_str();
@@ -112,7 +99,7 @@ Status Client::get_internal(const Sliver& _key, OUT Sliver& _outValue) const {
     _outValue = Sliver::copy(reinterpret_cast<const char*>(cbData.data), cbData.readLength);
     return Status::OK();
   } else {
-    LOG_ERROR(logger_, "get status: " << S3_get_status_name(cbData.status));
+    LOG_DEBUG(logger_, "get status: " << S3_get_status_name(cbData.status));
     if (cbData.status == S3Status::S3StatusHttpErrorNotFound || cbData.status == S3Status::S3StatusErrorNoSuchBucket ||
         cbData.status == S3Status::S3StatusErrorNoSuchKey)
       return Status::NotFound("Status: " + std::string(S3_get_status_name(cbData.status)) +
@@ -145,13 +132,9 @@ Status Client::put_internal(const Sliver& _key, const Sliver& _value) {
   putObjectHandler.putObjectDataCallback = f;
   string s = string(_key.data());
   S3_put_object(&context_, string(_key.data()).c_str(), _value.length(), NULL, NULL, &putObjectHandler, &cbData);
-  if (cbData.status == S3Status::S3StatusOK) {
-    metrics_.num_keys_transferred.Get().Inc();
-    metrics_.bytes_transferred.Get().Inc(_key.length() + _value.length());
-    metrics_.updateLastSavedBlockId(_key);
-    metrics_.metrics_component.UpdateAggregator();
+  if (cbData.status == S3Status::S3StatusOK)
     return Status::OK();
-  } else {
+  else {
     LOG_ERROR(logger_, "put status: " << cbData.status);
     if (cbData.status == S3Status::S3StatusHttpErrorNotFound || cbData.status == S3Status::S3StatusErrorNoSuchBucket)
       return Status::NotFound("Status: " + to_string(cbData.status) + "msg: " + cbData.errorMessage);

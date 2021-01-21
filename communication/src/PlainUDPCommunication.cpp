@@ -164,11 +164,6 @@ class PlainUDPCommunication::PlainUdpImpl {
     // Initialize socket.
     udpSockFd = socket(AF_INET, SOCK_DGRAM, 0);
 
-    if (udpSockFd < 0) {
-      LOG_FATAL(_logger, "Failed to initialize socket, error: " << strerror(errno));
-      std::terminate();
-    }
-
     // Name the socket.
     sAddr.sin_family = AF_INET;
     sAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -181,7 +176,7 @@ class PlainUDPCommunication::PlainUdpImpl {
                 "Error while binding: IP=" << sAddr.sin_addr.s_addr << ", Port=" << sAddr.sin_port
                                            << ", errno=" << concordUtils::errnoString(errno));
       ConcordAssert(false && "Failure occurred while binding the socket!");
-      std::terminate();
+      exit(1);  // TODO(GG): not really ..... change this !
     }
 
 #ifdef WIN32
@@ -396,11 +391,13 @@ int PlainUDPCommunication::Stop() {
 
 bool PlainUDPCommunication::isRunning() const { return _ptrImpl->isRunning(); }
 
-ConnectionStatus PlainUDPCommunication::getCurrentConnectionStatus(NodeNum node) {
+ConnectionStatus PlainUDPCommunication::getCurrentConnectionStatus(const NodeNum node) {
   return _ptrImpl->getCurrentConnectionStatus(node);
 }
 
-int PlainUDPCommunication::sendAsyncMessage(NodeNum destNode, const char *const message, size_t messageLength) {
+int PlainUDPCommunication::sendAsyncMessage(const NodeNum destNode,
+                                            const char *const message,
+                                            const size_t messageLength) {
   return _ptrImpl->sendAsyncMessage(destNode, message, messageLength);
 }
 

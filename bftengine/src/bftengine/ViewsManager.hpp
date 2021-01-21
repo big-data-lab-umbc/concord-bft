@@ -32,7 +32,6 @@ using std::vector;
 
 class ViewsManager {
   friend class ViewChangeMsg;
-  friend class ReplicaAsksToLeaveViewMsg;
 
  public:
   struct PrevViewInfo {
@@ -52,12 +51,12 @@ class ViewsManager {
 
   ViewsManager(const ReplicasInfo *const r,
                SigManager *sigmgr,
-               std::shared_ptr<IThresholdVerifier> preparedCertificateVerifier);  // TODO(GG): move to protected
+               IThresholdVerifier *const preparedCertificateVerifier);  // TODO(GG): move to protected
   ~ViewsManager();
 
   static ViewsManager *createOutsideView(const ReplicasInfo *const r,
                                          SigManager *sigMgr,
-                                         std::shared_ptr<IThresholdVerifier> preparedCertificateVerifier,
+                                         IThresholdVerifier *const preparedCertificateVerifier,
                                          ViewNum lastActiveView,
                                          SeqNum lastStable,
                                          SeqNum lastExecuted,
@@ -67,11 +66,11 @@ class ViewsManager {
 
   static ViewsManager *createInsideViewZero(const ReplicasInfo *const r,
                                             SigManager *sigMgr,
-                                            std::shared_ptr<IThresholdVerifier> preparedCertificateVerifier);
+                                            IThresholdVerifier *const preparedCertificateVerifier);
 
   static ViewsManager *createInsideView(const ReplicasInfo *const r,
                                         SigManager *sigMgr,
-                                        std::shared_ptr<IThresholdVerifier> preparedCertificateVerifier,
+                                        IThresholdVerifier *const preparedCertificateVerifier,
                                         ViewNum view,
                                         SeqNum stableLowerBound,
                                         NewViewMsg *newViewMsg,

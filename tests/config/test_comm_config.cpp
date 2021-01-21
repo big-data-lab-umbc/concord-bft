@@ -24,7 +24,6 @@
 #include "threshsign/ThresholdSignaturesSchemes.h"
 #include "KeyfileIOUtils.hpp"
 #include "config_file_parser.hpp"
-#include "CryptoManager.hpp"
 
 using bft::communication::PlainUdpConfig;
 using bft::communication::PlainTcpConfig;
@@ -55,8 +54,7 @@ void TestCommConfig::GetReplicaConfig(uint16_t replica_id,
                                       std::string keyFilePrefix,
                                       bftEngine::ReplicaConfig* out_config) {
   std::string key_file_name = keyFilePrefix + std::to_string(replica_id);
-  if (Cryptosystem* sys = inputReplicaKeyfileMultisig(key_file_name, *out_config); sys != nullptr)
-    bftEngine::CryptoManager::instance(out_config, sys);
+  if (!inputReplicaKeyfile(key_file_name, *out_config)) throw std::runtime_error("Unable to parse replica keyfile.");
 }
 
 std::unordered_map<NodeNum, NodeInfo> TestCommConfig::SetUpConfiguredNodes(bool is_replica,
@@ -173,8 +171,7 @@ TlsTcpConfig TestCommConfig::GetTlsTCPConfig(bool is_replica,
                                              uint16_t id,
                                              uint16_t& num_of_clients,
                                              uint16_t& num_of_replicas,
-                                             const std::string& config_file_name,
-                                             const std::string& cert_root_path) {
+                                             const std::string& config_file_name) {
   string ip;
   uint16_t port;
 
@@ -182,13 +179,7 @@ TlsTcpConfig TestCommConfig::GetTlsTCPConfig(bool is_replica,
       SetUpNodes(is_replica, id, ip, port, num_of_clients, num_of_replicas, config_file_name);
 
   // need to move the default cipher suite to the config file
-  TlsTcpConfig retVal(default_listen_ip_,
-                      port,
-                      buf_length_,
-                      nodes,
-                      num_of_replicas - 1,
-                      id,
-                      cert_root_path,
-                      "ECDHE-ECDSA-AES256-GCM-SHA384");
+  TlsTcpConfig retVal(
+      default_listen_ip_, port, buf_length_, nodes, num_of_replicas - 1, id, "certs", "ECDHE-ECDSA-AES256-GCM-SHA384");
   return retVal;
 }

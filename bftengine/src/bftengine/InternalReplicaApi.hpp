@@ -18,15 +18,14 @@
 #include "IncomingMsgsStorage.hpp"
 
 class IThresholdVerifier;
+class ReplicasInfo;
 namespace util {
 class SimpleThreadPool;
 }
 
 namespace bftEngine {
 namespace impl {
-
-class PrePrepareMsg;
-class ReplicasInfo;
+class FullCommitProofMsg;
 
 class InternalReplicaApi  // TODO(GG): rename + clean + split to several classes
 {
@@ -40,14 +39,6 @@ class InternalReplicaApi  // TODO(GG): rename + clean + split to several classes
   virtual bool isCurrentPrimary() const = 0;
   virtual bool currentViewIsActive() const = 0;
   virtual ReqId seqNumberOfLastReplyToClient(NodeIdType clientId) const = 0;
-  virtual bool isClientRequestInProcess(NodeIdType clientId, ReqId reqSeqNum) const = 0;
-  virtual SeqNum getPrimaryLastUsedSeqNum() const = 0;
-  virtual uint64_t getRequestsInQueue() const = 0;
-  virtual SeqNum getLastExecutedSeqNum() const = 0;
-  virtual PrePrepareMsg* buildPrePrepareMessage() { return nullptr; }
-  virtual bool tryToSendPrePrepareMsg(bool batchingLogic) { return false; }
-  virtual bool tryToSendPrePrepareMsgBatchByRequestsNum(uint32_t requiredRequestsNum) { return false; }
-  virtual bool tryToSendPrePrepareMsgBatchByOverallSize(uint32_t requiredBatchSizeInBytes) { return false; }
 
   virtual IncomingMsgsStorage& getIncomingMsgsStorage() = 0;
   virtual util::SimpleThreadPool& getInternalThreadPool() = 0;
@@ -56,7 +47,10 @@ class InternalReplicaApi  // TODO(GG): rename + clean + split to several classes
 
   virtual const ReplicaConfig& getReplicaConfig() const = 0;
 
-  virtual ~InternalReplicaApi() = default;
+  virtual IThresholdVerifier* getThresholdVerifierForExecution() = 0;
+  virtual IThresholdVerifier* getThresholdVerifierForSlowPathCommit() = 0;
+  virtual IThresholdVerifier* getThresholdVerifierForCommit() = 0;
+  virtual IThresholdVerifier* getThresholdVerifierForOptimisticCommit() = 0;
 };
 
 }  // namespace impl

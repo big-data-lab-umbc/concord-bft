@@ -16,12 +16,11 @@
 #include <cstdint>
 #include <functional>
 #include <string>
-#include "IReservedPages.hpp"
 
 namespace bftEngine {
 class IReplicaForStateTransfer;  // forward definition
 
-class IStateTransfer : public IReservedPages {
+class IStateTransfer {
  public:
   virtual ~IStateTransfer() {}
 
@@ -50,6 +49,13 @@ class IStateTransfer : public IReservedPages {
 
   virtual bool isCollectingState() const = 0;
 
+  // working with reserved pages
+  virtual uint32_t numberOfReservedPages() const = 0;
+  virtual uint32_t sizeOfReservedPage() const = 0;
+  virtual bool loadReservedPage(uint32_t reservedPageId, uint32_t copyLength, char *outReservedPage) const = 0;
+  virtual void saveReservedPage(uint32_t reservedPageId, uint32_t copyLength, const char *inReservedPage) = 0;
+  virtual void zeroReservedPage(uint32_t reservedPageId) = 0;
+
   // timer (for simple implementation, a state transfer module can use its own
   // timers and threads)
   virtual void onTimer() = 0;
@@ -69,15 +75,13 @@ class IStateTransfer : public IReservedPages {
   // Callbacks must not throw.
   // Multiple callbacks can be added.
   virtual void addOnTransferringCompleteCallback(std::function<void(uint64_t)>) = 0;
-
-  virtual void setEraseMetadataFlag() = 0;
 };
 
 // This interface may only be used when the state transfer module is runnning
 // (methods can be invoked by any thread)
 class IReplicaForStateTransfer {
  public:
-  virtual void onTransferringComplete(uint64_t checkpointNumberOfNewState) = 0;
+  virtual void onTransferringComplete(int64_t checkpointNumberOfNewState) = 0;
 
   // The following methods can be used to simplify the state transfer
   // implementations. (A state transfer module may not need to use them).

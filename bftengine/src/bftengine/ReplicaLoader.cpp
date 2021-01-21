@@ -16,7 +16,6 @@
 #include "ReplicaImp.hpp"
 #include "ViewsManager.hpp"
 #include "messages/FullCommitProofMsg.hpp"
-#include "CryptoManager.hpp"
 #include "Logger.hpp"
 
 #define Verify(expr, errorCode) \
@@ -53,8 +52,90 @@ namespace impl {
 // most code of ReplicaLoader is encapsulated in this file
 namespace {
 
+ReplicaLoader::ErrorCode checkReplicaConfig(const LoadedReplicaData &ld) {
+  const ReplicaConfig &c = ld.repConfig;
+
+  Verify(c.fVal >= 1, InconsistentErr);
+  Verify(c.cVal >= 0, InconsistentErr);
+
+  uint16_t numOfReplicas = 3 * c.fVal + 2 * c.cVal + 1;
+
+  Verify(numOfReplicas <= MaxNumberOfReplicas, InconsistentErr);
+
+  VerifyAND(c.replicaId >= 0, c.replicaId < numOfReplicas, InconsistentErr);
+
+  Verify(c.numOfClientProxies >= 1, InconsistentErr);  // TODO(GG): TBD - do we want maximum number of client proxies?
+
+  Verify(c.numOfExternalClients >= 0, InconsistentErr);
+
+  Verify(c.statusReportTimerMillisec > 0,
+         InconsistentErr);  // TODO(GG): TBD - do we want maximum for statusReportTimerMillisec?
+
+  Verify(c.concurrencyLevel >= 1, InconsistentErr);
+  Verify(c.concurrencyLevel <= (checkpointWindowSize / 5), InconsistentErr);
+  Verify(c.concurrencyLevel < MaxConcurrentFastPaths, InconsistentErr);
+  Verify(c.concurrencyLevel <= maxLegalConcurrentAgreementsByPrimary, InconsistentErr);
+
+  std::set<uint16_t> repIDs;
+  for (auto &v : c.publicKeysOfReplicas) {
+    VerifyAND(v.first >= 0, v.first < (numOfReplicas + c.numRoReplicas), InconsistentErr);
+    Verify(!v.second.empty(), InconsistentErr);  // TODO(GG): make sure that the key is valid
+    repIDs.insert(v.first);
+  }
+  Verify(repIDs.size() == numOfReplicas + c.numRoReplicas, InconsistentErr);
+
+  Verify(!c.replicaPrivateKey.empty(), InconsistentErr);  // TODO(GG): make sure that the key is valid
+
+  Verify(c.thresholdSignerForSlowPathCommit != nullptr, InconsistentErr);
+  Verify(c.thresholdVerifierForSlowPathCommit != nullptr, InconsistentErr);
+
+  if (c.cVal == 0) {
+  } else {
+    Verify(c.thresholdSignerForCommit != nullptr, InconsistentErr);
+    Verify(c.thresholdVerifierForCommit != nullptr, InconsistentErr);
+  }
+
+  Verify(c.thresholdSignerForOptimisticCommit != nullptr, InconsistentErr);
+  Verify(c.thresholdVerifierForOptimisticCommit != nullptr, InconsistentErr);
+
+  // TODO: make sure that the verifiers and signers are valid
+
+  return Succ;
+}
+
+void setDynamicallyConfigurableParameters(ReplicaConfig &config) {
+  config.numOfClientProxies = ReplicaConfigSingleton::GetInstance().GetNumOfClientProxies();
+  config.numOfExternalClients = ReplicaConfigSingleton::GetInstance().GetNumOfExternalClients();
+  config.statusReportTimerMillisec = ReplicaConfigSingleton::GetInstance().GetStatusReportTimerMillisec();
+  config.concurrencyLevel = ReplicaConfigSingleton::GetInstance().GetConcurrencyLevel();
+  config.viewChangeProtocolEnabled = ReplicaConfigSingleton::GetInstance().GetViewChangeProtocolEnabled();
+  config.viewChangeTimerMillisec = ReplicaConfigSingleton::GetInstance().GetViewChangeTimerMillisec();
+  config.autoPrimaryRotationEnabled = ReplicaConfigSingleton::GetInstance().GetAutoPrimaryRotationEnabled();
+  config.autoPrimaryRotationTimerMillisec = ReplicaConfigSingleton::GetInstance().GetAutoPrimaryRotationTimerMillisec();
+  config.preExecutionFeatureEnabled = ReplicaConfigSingleton::GetInstance().GetPreExecutionFeatureEnabled();
+  config.preExecReqStatusCheckTimerMillisec =
+      ReplicaConfigSingleton::GetInstance().GetPreExecReqStatusCheckTimerMillisec();
+  config.maxExternalMessageSize = ReplicaConfigSingleton::GetInstance().GetMaxExternalMessageSize();
+  config.maxReplyMessageSize = ReplicaConfigSingleton::GetInstance().GetMaxReplyMessageSize();
+  config.maxNumOfReservedPages = ReplicaConfigSingleton::GetInstance().GetMaxNumOfReservedPages();
+  config.sizeOfReservedPage = ReplicaConfigSingleton::GetInstance().GetSizeOfReservedPage();
+  config.debugStatisticsEnabled = ReplicaConfigSingleton::GetInstance().GetDebugStatisticsEnabled();
+  config.metricsDumpIntervalSeconds = ReplicaConfigSingleton::GetInstance().GetMetricsDumpInterval();
+  config.keyExchangeOnStart = ReplicaConfigSingleton::GetInstance().GetKeyExchangeOnStart();
+}
+
 ReplicaLoader::ErrorCode loadConfig(shared_ptr<PersistentStorage> &p, LoadedReplicaData &ld) {
   ConcordAssert(p != nullptr);
+
+  Verify(p->hasReplicaConfig(), NoDataErr);
+
+  ld.repConfig = p->getReplicaConfig();
+  // Allow changing some parameters dynamically using configuration file
+  setDynamicallyConfigurableParameters(ld.repConfig);
+
+  ReplicaLoader::ErrorCode stat = checkReplicaConfig(ld);
+
+  Verify((stat == Succ), stat);
 
   std::set<SigManager::PublicKeyDesc> replicasSigPublicKeys;
 
@@ -71,15 +152,6 @@ ReplicaLoader::ErrorCode loadConfig(shared_ptr<PersistentStorage> &p, LoadedRepl
                                  replicasSigPublicKeys);
 
   ld.repsInfo = new ReplicasInfo(ld.repConfig, dynamicCollectorForPartialProofs, dynamicCollectorForExecutionProofs);
-
-  Cryptosystem *cryptoSys = new Cryptosystem(ld.repConfig.thresholdSystemType_,
-                                             ld.repConfig.thresholdSystemSubType_,
-                                             ld.repConfig.numReplicas,
-                                             ld.repConfig.numReplicas);
-  cryptoSys->loadKeys(ld.repConfig.thresholdPublicKey_, ld.repConfig.thresholdVerificationKeys_);
-  cryptoSys->loadPrivateKey(ld.repConfig.replicaId + 1, ld.repConfig.thresholdPrivateKey_);
-  bftEngine::CryptoManager::instance(&ld.repConfig, cryptoSys);
-
   return Succ;
 }
 
@@ -91,6 +163,7 @@ ReplicaLoader::ErrorCode checkViewDesc(const DescriptorOfLastExitFromView *exitD
 
 ReplicaLoader::ErrorCode loadViewInfo(shared_ptr<PersistentStorage> &p, LoadedReplicaData &ld) {
   ConcordAssert(p != nullptr);
+  ConcordAssert(ld.repsInfo != nullptr) ConcordAssert(ld.repConfig.thresholdVerifierForSlowPathCommit != nullptr);
   ConcordAssert(ld.viewsManager == nullptr);
 
   DescriptorOfLastExitFromView descriptorOfLastExitFromView;
@@ -118,8 +191,8 @@ ReplicaLoader::ErrorCode loadViewInfo(shared_ptr<PersistentStorage> &p, LoadedRe
 
   ViewsManager *viewsManager = nullptr;
   if (!hasDescLastExitFromView && !hasDescOfLastNewView) {
-    viewsManager = ViewsManager::createInsideViewZero(
-        ld.repsInfo, ld.sigManager, CryptoManager::instance().thresholdVerifierForSlowPathCommit());
+    viewsManager =
+        ViewsManager::createInsideViewZero(ld.repsInfo, ld.sigManager, ld.repConfig.thresholdVerifierForSlowPathCommit);
 
     ConcordAssert(viewsManager->latestActiveView() == 0);
     ConcordAssert(viewsManager->viewIsActive(0));
@@ -130,7 +203,7 @@ ReplicaLoader::ErrorCode loadViewInfo(shared_ptr<PersistentStorage> &p, LoadedRe
 
     viewsManager = ViewsManager::createOutsideView(ld.repsInfo,
                                                    ld.sigManager,
-                                                   CryptoManager::instance().thresholdVerifierForSlowPathCommit(),
+                                                   ld.repConfig.thresholdVerifierForSlowPathCommit,
                                                    descriptorOfLastExitFromView.view,
                                                    descriptorOfLastExitFromView.lastStable,
                                                    descriptorOfLastExitFromView.lastExecuted,
@@ -148,7 +221,7 @@ ReplicaLoader::ErrorCode loadViewInfo(shared_ptr<PersistentStorage> &p, LoadedRe
 
     viewsManager = ViewsManager::createOutsideView(ld.repsInfo,
                                                    ld.sigManager,
-                                                   CryptoManager::instance().thresholdVerifierForSlowPathCommit(),
+                                                   ld.repConfig.thresholdVerifierForSlowPathCommit,
                                                    descriptorOfLastExitFromView.view,
                                                    descriptorOfLastExitFromView.lastStable,
                                                    descriptorOfLastExitFromView.lastExecuted,
@@ -167,7 +240,7 @@ ReplicaLoader::ErrorCode loadViewInfo(shared_ptr<PersistentStorage> &p, LoadedRe
 
     viewsManager = ViewsManager::createInsideView(ld.repsInfo,
                                                   ld.sigManager,
-                                                  CryptoManager::instance().thresholdVerifierForSlowPathCommit(),
+                                                  ld.repConfig.thresholdVerifierForSlowPathCommit,
                                                   descriptorOfLastNewView.view,
                                                   descriptorOfLastNewView.stableLowerBoundWhenEnteredToView,
                                                   descriptorOfLastNewView.newViewMsg,

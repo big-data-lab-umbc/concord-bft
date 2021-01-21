@@ -164,7 +164,7 @@ class AllReplicasRestartVC : public AllReplicasRestartNoVC {
   }
 };
 
-inline ISimpleTestReplicaBehavior *create_replica_behavior(ReplicaBehavior b, ReplicaParams rp) {
+ISimpleTestReplicaBehavior *create_replica_behavior(ReplicaBehavior b, ReplicaParams rp) {
   switch (b) {
     case ReplicaBehavior::Default:
       return new DefaultReplicaBehavior(rp);

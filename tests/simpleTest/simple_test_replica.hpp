@@ -30,15 +30,14 @@ using namespace bftEngine;
 using namespace bft::communication;
 using namespace std;
 
-// NOLINTNEXTLINE(misc-definitions-in-headers)
 logging::Logger replicaLogger = logging::getLogger("simpletest.replica");
 
-#define test_assert_replica(statement, message)                                                                   \
-  {                                                                                                               \
-    if (!(statement)) {                                                                                           \
-      LOG_FATAL(replicaLogger, "assert fail with message: " << message); /* NOLINT(bugprone-macro-parentheses) */ \
-      ConcordAssert(false);                                                                                       \
-    }                                                                                                             \
+#define test_assert_replica(statement, message)                          \
+  {                                                                      \
+    if (!(statement)) {                                                  \
+      LOG_FATAL(replicaLogger, "assert fail with message: " << message); \
+      ConcordAssert(false);                                              \
+    }                                                                    \
   }
 
 // The replica state machine.
@@ -74,56 +73,61 @@ class SimpleAppState : public IRequestsHandler {
   ~SimpleAppState() { delete[] statePtr; }
 
   // Handler for the upcall from Concord-BFT.
-  void execute(ExecutionRequestsQueue &requests,
-               const std::string &batchCid,
-               concordUtils::SpanWrapper &parent_span) override {
-    for (auto &req : requests) {
-      // Not currently used
-      req.outReplicaSpecificInfoSize = 0;
+  int execute(uint16_t clientId,
+              uint64_t sequenceNum,
+              uint8_t flags,
+              uint32_t requestSize,
+              const char *request,
+              uint32_t maxReplySize,
+              char *outReply,
+              uint32_t &outActualReplySize,
+              uint32_t &outActualReplicaSpecificInfoSize,
+              concordUtils::SpanWrapper &span) override {
+    // Not currently used
+    outActualReplicaSpecificInfoSize = 0;
 
-      bool readOnly = req.flags & READ_ONLY_FLAG;
-      if (readOnly) {
-        // Our read-only request includes only a type, no argument.
-        test_assert_replica(req.requestSize == sizeof(uint64_t), "requestSize =! " << sizeof(uint64_t));
+    bool readOnly = flags & READ_ONLY_FLAG;
+    if (readOnly) {
+      // Our read-only request includes only a type, no argument.
+      test_assert_replica(requestSize == sizeof(uint64_t), "requestSize =! " << sizeof(uint64_t));
 
-        // We only support the READ operation in read-only mode.
-        test_assert_replica(*reinterpret_cast<const uint64_t *>(req.request) == READ_VAL_REQ,
-                            "request is NOT " << READ_VAL_REQ);
+      // We only support the READ operation in read-only mode.
+      test_assert_replica(*reinterpret_cast<const uint64_t *>(request) == READ_VAL_REQ,
+                          "request is NOT " << READ_VAL_REQ);
 
-        // Copy the latest register value to the reply buffer.
-        test_assert_replica(req.maxReplySize >= sizeof(uint64_t), "maxReplySize < " << sizeof(uint64_t));
-        uint64_t *pRet = const_cast<uint64_t *>(reinterpret_cast<const uint64_t *>(req.outReply));
-        auto lastValue = get_last_state_value(req.clientId);
-        *pRet = lastValue;
-        req.outActualReplySize = sizeof(uint64_t);
-      } else {
-        // Our read-write request includes one eight-byte argument, in addition to
-        // the request type.
-        test_assert_replica(req.requestSize == 2 * sizeof(uint64_t), "requestSize != " << 2 * sizeof(uint64_t));
+      // Copy the latest register value to the reply buffer.
+      test_assert_replica(maxReplySize >= sizeof(uint64_t), "maxReplySize < " << sizeof(uint64_t));
+      uint64_t *pRet = reinterpret_cast<uint64_t *>(outReply);
+      auto lastValue = get_last_state_value(clientId);
+      *pRet = lastValue;
+      outActualReplySize = sizeof(uint64_t);
+    } else {
+      // Our read-write request includes one eight-byte argument, in addition to
+      // the request type.
+      test_assert_replica(requestSize == 2 * sizeof(uint64_t), "requestSize != " << 2 * sizeof(uint64_t));
 
-        // We only support the WRITE operation in read-write mode.
-        const uint64_t *pReqId = reinterpret_cast<const uint64_t *>(req.request);
-        test_assert_replica(*pReqId == SET_VAL_REQ, "*preqId != " << SET_VAL_REQ);
+      // We only support the WRITE operation in read-write mode.
+      const uint64_t *pReqId = reinterpret_cast<const uint64_t *>(request);
+      test_assert_replica(*pReqId == SET_VAL_REQ, "*preqId != " << SET_VAL_REQ);
 
-        // The value to write is the second eight bytes of the request.
-        const uint64_t *pReqVal = (pReqId + 1);
+      // The value to write is the second eight bytes of the request.
+      const uint64_t *pReqVal = (pReqId + 1);
 
-        // Modify the register state.
-        set_last_state_value(req.clientId, *pReqVal);
-        // Count the number of times we've modified it.
-        auto stateNum = get_last_state_num(req.clientId);
-        set_last_state_num(req.clientId, stateNum + 1);
+      // Modify the register state.
+      set_last_state_value(clientId, *pReqVal);
+      // Count the number of times we've modified it.
+      auto stateNum = get_last_state_num(clientId);
+      set_last_state_num(clientId, stateNum + 1);
 
-        // Reply with the number of times we've modified the register.
-        test_assert_replica(req.maxReplySize >= sizeof(uint64_t), "maxReplySize < " << sizeof(uint64_t));
-        uint64_t *pRet = const_cast<uint64_t *>(reinterpret_cast<const uint64_t *>(req.outReply));
-        *pRet = stateNum;
-        req.outActualReplySize = sizeof(uint64_t);
+      // Reply with the number of times we've modified the register.
+      test_assert_replica(maxReplySize >= sizeof(uint64_t), "maxReplySize < " << sizeof(uint64_t));
+      uint64_t *pRet = reinterpret_cast<uint64_t *>(outReply);
+      *pRet = stateNum;
+      outActualReplySize = sizeof(uint64_t);
 
-        st->markUpdate(statePtr, sizeof(State) * numOfClients);
-      }
-      req.outExecutionStatus = 0;
+      st->markUpdate(statePtr, sizeof(State) * numOfClients);
     }
+    return 0;
   }
 
   struct State {
@@ -144,7 +148,7 @@ class SimpleTestReplica {
  private:
   ICommunication *comm;
   bftEngine::IReplica::IReplicaPtr replica = nullptr;
-  const ReplicaConfig &replicaConfig;
+  ReplicaConfig replicaConfig;
   std::thread *runnerThread = nullptr;
   ISimpleTestReplicaBehavior *behaviorPtr;
   IRequestsHandler *statePtr;
@@ -154,12 +158,12 @@ class SimpleTestReplica {
  public:
   SimpleTestReplica(ICommunication *commObject,
                     IRequestsHandler *state,
-                    const ReplicaConfig &rc,
+                    ReplicaConfig rc,
                     ISimpleTestReplicaBehavior *behvPtr,
                     bftEngine::SimpleInMemoryStateTransfer::ISimpleInMemoryStateTransfer *inMemoryST,
                     MetadataStorage *metaDataStorage)
       : comm{commObject}, replicaConfig{rc}, behaviorPtr{behvPtr}, statePtr(state), inMemoryST_(inMemoryST) {
-    replica = IReplica::createNewReplica(rc, state, inMemoryST, comm, metaDataStorage);
+    replica = IReplica::createNewReplica(&rc, state, inMemoryST, comm, metaDataStorage);
   }
 
   ~SimpleTestReplica() {
@@ -175,6 +179,16 @@ class SimpleTestReplica {
     if (statePtr) {
       delete statePtr;
     }
+
+    delete (replicaConfig.thresholdSignerForExecution);
+    delete (replicaConfig.thresholdSignerForSlowPathCommit);
+    delete (replicaConfig.thresholdSignerForCommit);
+    delete (replicaConfig.thresholdSignerForOptimisticCommit);
+
+    delete (replicaConfig.thresholdVerifierForExecution);
+    delete (replicaConfig.thresholdVerifierForSlowPathCommit);
+    delete (replicaConfig.thresholdVerifierForCommit);
+    delete (replicaConfig.thresholdVerifierForOptimisticCommit);
   }
 
   uint16_t get_replica_id() { return replicaConfig.replicaId; }
@@ -225,7 +239,7 @@ class SimpleTestReplica {
                                            ReplicaParams rp,
                                            MetadataStorage *metaDataStorage) {
     TestCommConfig testCommConfig(replicaLogger);
-    ReplicaConfig &replicaConfig = ReplicaConfig::instance();
+    ReplicaConfig replicaConfig;
     testCommConfig.GetReplicaConfig(rp.replicaId, rp.keysFilePrefix, &replicaConfig);
     replicaConfig.numOfClientProxies = rp.numOfClients;
     replicaConfig.viewChangeProtocolEnabled = rp.viewChangeEnabled;
@@ -235,6 +249,8 @@ class SimpleTestReplica {
     replicaConfig.concurrencyLevel = 1;
     replicaConfig.debugPersistentStorageEnabled =
         rp.persistencyMode == PersistencyMode::InMemory || rp.persistencyMode == PersistencyMode::File;
+
+    replicaConfig.singletonFromThis();
 
     // This is the state machine that the replica will drive.
     SimpleAppState *simpleAppState = new SimpleAppState(rp.numOfClients, rp.numOfReplicas);

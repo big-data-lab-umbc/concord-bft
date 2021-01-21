@@ -20,8 +20,7 @@
 #include "rocksdb/key_comparator.h"
 
 #ifdef USE_S3_OBJECT_STORE
-#include "s3/key_manipulator.h"
-#include "s3/client.hpp"
+#include "object_store/object_store_client.hpp"
 #endif
 
 #include <chrono>
@@ -74,17 +73,18 @@ std::unique_ptr<storage::ISTKeyManipulator> MemoryDBStorageFactory::newSTKeyMani
   return std::make_unique<storage::v1DirectKeyValue::STKeyManipulator>();
 }
 
-#if defined(USE_S3_OBJECT_STORE)
+#if defined(USE_S3_OBJECT_STORE) && defined(USE_ROCKSDB)
 IStorageFactory::DatabaseSet S3StorageFactory::newDatabaseSet() const {
   auto ret = IStorageFactory::DatabaseSet{};
-  const auto comparator = storage::memorydb::KeyComparator{new DBKeyComparator{}};
-  ret.metadataDBClient = std::make_shared<storage::memorydb::Client>(comparator);
-  ret.dataDBClient = std::make_shared<storage::s3::Client>(s3Conf_);
+
+  ret.metadataDBClient = createRocksDBClient(metadataDBPath_);
+  ret.metadataDBClient->init();
+  ret.dataDBClient = std::make_shared<storage::ObjectStoreClient>(new storage::s3::Client{s3Conf_});
   ret.dataDBClient->init();
 
-  auto dataKeyGenerator = std::make_unique<S3KeyGenerator>(s3Conf_.pathPrefix);
-  ret.dbAdapter = std::make_unique<DBAdapter>(
-      ret.dataDBClient, std::move(dataKeyGenerator), true /* use_mdt */, false /* save_kv_pairs_separately */);
+  const auto prefix = std::to_string(std::chrono::high_resolution_clock::now().time_since_epoch().count());
+  auto dataKeyGenerator = std::make_unique<S3KeyGenerator>(prefix);
+  ret.dbAdapter = std::make_unique<DBAdapter>(ret.dataDBClient, std::move(dataKeyGenerator), true);
 
   return ret;
 }
@@ -94,7 +94,7 @@ std::unique_ptr<storage::IMetadataKeyManipulator> S3StorageFactory::newMetadataK
 }
 
 std::unique_ptr<storage::ISTKeyManipulator> S3StorageFactory::newSTKeyManipulator() const {
-  return std::make_unique<storage::s3::STKeyManipulator>(s3Conf_.pathPrefix);
+  return std::make_unique<storage::v1DirectKeyValue::STKeyManipulator>();
 }
 #endif
 

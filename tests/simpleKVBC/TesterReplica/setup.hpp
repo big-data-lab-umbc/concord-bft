@@ -47,14 +47,14 @@ class TestSetup {
     V2MerkleTree,
   };
 
-  TestSetup(const bftEngine::ReplicaConfig& config,
+  TestSetup(bftEngine::ReplicaConfig config,
             std::unique_ptr<bft::communication::ICommunication> comm,
             logging::Logger logger,
             uint16_t metricsPort,
             bool usePersistentStorage,
-            const std::string& s3ConfigFile,
+            std::string s3ConfigFile,
             StorageType storageType,
-            const std::string& logPropsFile)
+            std::string logPropsFile)
       : replicaConfig_(config),
         communication_(std::move(comm)),
         logger_(logger),
@@ -68,7 +68,7 @@ class TestSetup {
   concord::storage::s3::StoreConfig ParseS3Config(const std::string& s3ConfigFile);
 #endif
   std::unique_ptr<IStorageFactory> GetInMemStorageFactory() const;
-  const bftEngine::ReplicaConfig& replicaConfig_;
+  bftEngine::ReplicaConfig replicaConfig_;
   std::unique_ptr<bft::communication::ICommunication> communication_;
   logging::Logger logger_;
   concordMetrics::Server metricsServer_;

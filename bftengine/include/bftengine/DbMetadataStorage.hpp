@@ -47,11 +47,9 @@ class DBMetadataStorage : public bftEngine::MetadataStorage {
   void commitAtomicWriteOnlyBatch() override;
   concordUtils::Status multiDel(const ObjectIdsVector &objectIds);
   bool isNewStorage() override;
-  void eraseData() override;
 
  private:
   void verifyOperation(uint32_t objectId, uint32_t dataLen, const char *buffer, bool writeOperation) const;
-  void cleanDB();
 
  private:
   const char *WRONG_FLOW = "beginAtomicWriteOnlyBatch should be launched first";

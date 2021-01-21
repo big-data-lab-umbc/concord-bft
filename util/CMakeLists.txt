@@ -9,8 +9,7 @@ set(util_source_files
     src/status.cpp
     src/sliver.cpp
     src/hex_tools.cpp
-    src/OpenTracing.cpp
-    src/throughput.cpp)
+    src/OpenTracing.cpp)
 
 add_library(util STATIC
     ${util_source_files}

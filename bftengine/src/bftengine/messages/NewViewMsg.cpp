@@ -15,14 +15,14 @@
 namespace bftEngine {
 namespace impl {
 
-NewViewMsg::NewViewMsg(ReplicaId senderId, ViewNum newView, const concordUtils::SpanContext& spanContext)
+NewViewMsg::NewViewMsg(ReplicaId senderId, ViewNum newView, const std::string& spanContext)
     : MessageBase(senderId,
                   MsgCode::NewView,
-                  spanContext.data().size(),
-                  ReplicaConfig::instance().getmaxExternalMessageSize() - spanContext.data().size()) {
+                  spanContext.size(),
+                  ReplicaConfigSingleton::GetInstance().GetMaxExternalMessageSize() - spanContext.size()) {
   b()->newViewNum = newView;
   b()->elementsCount = 0;
-  memcpy(body() + sizeof(Header), spanContext.data().data(), spanContext.data().size());
+  memcpy(body() + sizeof(Header), spanContext.data(), spanContext.size());
 }
 
 NewViewMsg::NewViewElement* NewViewMsg::elementsArray() const {
@@ -37,7 +37,7 @@ void NewViewMsg::addElement(ReplicaId replicaId, Digest& viewChangeDigest) {
   // TODO(GG): we should reject configurations that may violate this assert. TODO(GG): we need something similar for the
   // VC message
   ConcordAssert(requiredSize <=
-                ReplicaConfig::instance().getmaxExternalMessageSize());  // not enough space in the message
+                ReplicaConfigSingleton::GetInstance().GetMaxExternalMessageSize());  // not enough space in the message
 
   auto elements = elementsArray();
 
@@ -69,7 +69,7 @@ void NewViewMsg::validate(const ReplicasInfo& repInfo) const {
   const uint16_t contentSize = sizeof(Header) + expectedElements * sizeof(NewViewElement) + spanContextSize();
 
   if (size() < contentSize || !repInfo.isIdOfReplica(senderId()) ||  // source replica
-      repInfo.myId() == senderId() || repInfo.primaryOfView(newView()) != senderId() ||
+      repInfo.myId() == senderId() || repInfo.primaryOfView(newView() != senderId()) ||
       b()->elementsCount != expectedElements)  // num of elements
     throw std::runtime_error(__PRETTY_FUNCTION__ + std::string(": basic"));
 

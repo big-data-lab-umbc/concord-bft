@@ -20,14 +20,13 @@
 #include "SimpleBCStateTransfer.hpp"
 
 namespace bftEngine {
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 namespace impl {
 class STDigest : StateTransferDigest {
  public:
   STDigest() { memset(content, 0, BLOCK_DIGEST_SIZE); }
   STDigest(const char* other) { memcpy(content, other, BLOCK_DIGEST_SIZE); }
 
-  // NOLINTNEXTLINE(bugprone-copy-constructor-init)
   STDigest(const STDigest& other) { memcpy(content, other.content, BLOCK_DIGEST_SIZE); }
 
   bool isZero() const {
@@ -81,5 +80,5 @@ class DigestContext {
 };
 
 }  // namespace impl
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 }  // namespace bftEngine

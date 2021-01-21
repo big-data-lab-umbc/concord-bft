@@ -14,9 +14,7 @@
 #include <type_traits>
 #include <unordered_map>
 #include <set>
-#include <iterator>
 
-#include "OpenTracing.hpp"
 #include "PrimitiveTypes.hpp"
 #include "Digest.hpp"
 #include "Crypto.hpp"
@@ -24,9 +22,6 @@
 #include "IncomingMsgsStorage.hpp"
 #include "assertUtils.hpp"
 #include "messages/SignedShareMsgs.hpp"
-#include "Logger.hpp"
-#include "kvstream.h"
-#include "demangle.hpp"
 
 namespace bftEngine {
 namespace impl {
@@ -37,17 +32,6 @@ template <typename PART, typename FULL, typename ExternalFunc>
 class CollectorOfThresholdSignatures {
  public:
   CollectorOfThresholdSignatures(void* cnt) { this->context = cnt; }
-
-  void acquire(CollectorOfThresholdSignatures* rhs) {
-    replicasInfo = rhs->replicasInfo;
-    rhs->replicasInfo.clear();
-
-    combinedValidSignatureMsg = rhs->combinedValidSignatureMsg;
-    rhs->combinedValidSignatureMsg = nullptr;
-
-    candidateCombinedSignatureMsg = rhs->candidateCombinedSignatureMsg;
-    rhs->candidateCombinedSignatureMsg = nullptr;
-  }
 
   ~CollectorOfThresholdSignatures() { resetAndFree(); }
 
@@ -61,8 +45,7 @@ class CollectorOfThresholdSignatures {
     replicasInfo[repId] = info;
 
     numberOfUnknownSignatures++;
-    LOG_TRACE(THRESHSIGN_LOG,
-              KVLOG(partialSigMsg->seqNumber(), partialSigMsg->viewNumber(), numberOfUnknownSignatures));
+
     trySendToBkThread();
 
     return true;
@@ -72,7 +55,6 @@ class CollectorOfThresholdSignatures {
     if (combinedValidSignatureMsg != nullptr || candidateCombinedSignatureMsg != nullptr) return false;
 
     candidateCombinedSignatureMsg = combinedSigMsg;
-    LOG_TRACE(THRESHSIGN_LOG, KVLOG(combinedSigMsg->seqNumber(), combinedSigMsg->viewNumber()));
 
     trySendToBkThread();
 
@@ -83,7 +65,7 @@ class CollectorOfThresholdSignatures {
     ConcordAssert(seqNumber != 0);
     ConcordAssert(expectedSeqNumber == 0);
     ConcordAssert(!processingSignaturesInTheBackground);
-    LOG_TRACE(THRESHSIGN_LOG, KVLOG(seqNumber, view));
+
     expectedSeqNumber = seqNumber;
     expectedView = view;
     expectedDigest = digest;
@@ -140,16 +122,15 @@ class CollectorOfThresholdSignatures {
       repInfo.state = SigState::Invalid;
       numberOfUnknownSignatures--;
     }
-    LOG_TRACE(THRESHSIGN_LOG, KVLOG(seqNumber, view, replicasWithBadSigs.size()));
+
     trySendToBkThread();
   }
 
-  void onCompletionOfSignaturesProcessing(
-      SeqNum seqNumber,
-      ViewNum view,
-      const char* combinedSig,
-      uint16_t combinedSigLen,
-      const concordUtils::SpanContext& span_context)  // if we compute a valid combined signature
+  void onCompletionOfSignaturesProcessing(SeqNum seqNumber,
+                                          ViewNum view,
+                                          const char* combinedSig,
+                                          uint16_t combinedSigLen,
+                                          const std::string& span_context)  // if we compute a valid combined signature
   {
     ConcordAssert(expectedSeqNumber == seqNumber);
     ConcordAssert(expectedView == view);
@@ -162,7 +143,7 @@ class CollectorOfThresholdSignatures {
       delete candidateCombinedSignatureMsg;
       candidateCombinedSignatureMsg = nullptr;
     }
-    LOG_TRACE(THRESHSIGN_LOG, KVLOG(seqNumber, view));
+
     combinedValidSignatureMsg =
         ExternalFunc::createCombinedSignatureMsg(context, seqNumber, view, combinedSig, combinedSigLen, span_context);
   }
@@ -175,7 +156,7 @@ class CollectorOfThresholdSignatures {
     ConcordAssert(candidateCombinedSignatureMsg != nullptr);
 
     processingSignaturesInTheBackground = false;
-    LOG_TRACE(THRESHSIGN_LOG, KVLOG(seqNumber, view, isValid));
+
     if (isValid) {
       combinedValidSignatureMsg = candidateCombinedSignatureMsg;
       candidateCombinedSignatureMsg = nullptr;
@@ -232,10 +213,10 @@ class CollectorOfThresholdSignatures {
     ConcordAssert(combinedValidSignatureMsg == nullptr);
     ConcordAssert(candidateCombinedSignatureMsg == nullptr);
 
-    auto verifier = ExternalFunc::thresholdVerifier();
+    IThresholdVerifier* const verifier = ExternalFunc::thresholdVerifier(context);
     bool succ = verifier->verify(
         (char*)&expectedDigest, sizeof(Digest), combinedSigMsg->signatureBody(), combinedSigMsg->signatureLen());
-    if (!succ) throw std::runtime_error("failed to verify");
+    ConcordAssert(succ);  // we should verify this signature when it is loaded
 
     combinedValidSignatureMsg = combinedSigMsg;
 
@@ -251,11 +232,10 @@ class CollectorOfThresholdSignatures {
 
     if (processingSignaturesInTheBackground || expectedSeqNumber == 0) return;
 
-    LOG_TRACE(THRESHSIGN_LOG, KVLOG(expectedSeqNumber, expectedView, numOfRequiredSigs));
     if (candidateCombinedSignatureMsg != nullptr) {
       processingSignaturesInTheBackground = true;
 
-      CombinedSigVerificationJob* bkJob = new CombinedSigVerificationJob(ExternalFunc::thresholdVerifier(),
+      CombinedSigVerificationJob* bkJob = new CombinedSigVerificationJob(ExternalFunc::thresholdVerifier(context),
                                                                          &ExternalFunc::incomingMsgsStorage(context),
                                                                          expectedSeqNumber,
                                                                          expectedView,
@@ -268,7 +248,7 @@ class CollectorOfThresholdSignatures {
     } else if (numberOfUnknownSignatures >= numOfRequiredSigs) {
       processingSignaturesInTheBackground = true;
 
-      SignaturesProcessingJob* bkJob = new SignaturesProcessingJob(ExternalFunc::thresholdVerifier(),
+      SignaturesProcessingJob* bkJob = new SignaturesProcessingJob(ExternalFunc::thresholdVerifier(context),
                                                                    &ExternalFunc::incomingMsgsStorage(context),
                                                                    expectedSeqNumber,
                                                                    expectedView,
@@ -304,10 +284,10 @@ class CollectorOfThresholdSignatures {
       ReplicaId srcRepId;
       char* sigBody;
       uint16_t sigLength;
-      concordUtils::SpanContext span_context;
+      std::string span_context;
     };
 
-    std::shared_ptr<IThresholdVerifier> verifier;
+    IThresholdVerifier* const verifier;
     IncomingMsgsStorage* const repMsgsStorage;
     const SeqNum expectedSeqNumber;
     const ViewNum expectedView;
@@ -322,7 +302,7 @@ class CollectorOfThresholdSignatures {
     virtual ~SignaturesProcessingJob() {}
 
    public:
-    SignaturesProcessingJob(std::shared_ptr<IThresholdVerifier> thresholdVerifier,
+    SignaturesProcessingJob(IThresholdVerifier* const thresholdVerifier,
                             IncomingMsgsStorage* const replicaMsgsStorage,
                             SeqNum seqNum,
                             ViewNum view,
@@ -338,13 +318,9 @@ class CollectorOfThresholdSignatures {
           sigDataItems{new SigData[numOfRequired]},
           numOfDataItems(0) {
       this->context = cnt;
-      LOG_TRACE(THRESHSIGN_LOG, KVLOG(expectedSeqNumber, expectedView, reqDataItems));
     }
 
-    void add(ReplicaId srcRepId,
-             const char* sigBody,
-             uint16_t sigLength,
-             const concordUtils::SpanContext& span_context) {
+    void add(ReplicaId srcRepId, const char* sigBody, uint16_t sigLength, const std::string& span_context) {
       ConcordAssert(numOfDataItems < reqDataItems);
 
       SigData d;
@@ -356,7 +332,6 @@ class CollectorOfThresholdSignatures {
 
       sigDataItems[numOfDataItems] = d;
       numOfDataItems++;
-      LOG_TRACE(THRESHSIGN_LOG, KVLOG(srcRepId, numOfDataItems));
     }
 
     virtual void release() override {
@@ -372,25 +347,26 @@ class CollectorOfThresholdSignatures {
 
     virtual void execute() override {
       ConcordAssert(numOfDataItems == reqDataItems);
-      SCOPED_MDC_SEQ_NUM(std::to_string(expectedSeqNumber));
-      MDC_PUT(MDC_THREAD_KEY, demangler::demangle<FULL>());
+
       // TODO(GG): can utilize several threads (discuss with Alin)
 
       const uint16_t bufferSize = (uint16_t)verifier->requiredLengthForSignedData();
       std::vector<char> bufferForSigComputations(bufferSize);
 
       const auto& span_context_of_last_message =
-          (reqDataItems - 1) ? sigDataItems[reqDataItems - 1].span_context : concordUtils::SpanContext{};
+          (reqDataItems - 1) ? sigDataItems[reqDataItems - 1].span_context : std::string{};
       {
-        auto acc = verifier->newAccumulator(false);
+        IThresholdAccumulator* acc = verifier->newAccumulator(false);
 
-        for (uint16_t i = 0; i < reqDataItems; i++) acc->add(sigDataItems[i].sigBody, sigDataItems[i].sigLength);
+        for (uint16_t i = 0; i < reqDataItems; i++) {
+          acc->add(sigDataItems[i].sigBody, sigDataItems[i].sigLength);
+        }
 
         acc->setExpectedDigest(reinterpret_cast<unsigned char*>(expectedDigest.content()), DIGEST_SIZE);
 
         acc->getFullSignedData(bufferForSigComputations.data(), bufferSize);
 
-        delete acc;
+        verifier->release(acc);
       }
 
       bool succ = verifier->verify((char*)&expectedDigest, sizeof(Digest), bufferForSigComputations.data(), bufferSize);
@@ -400,7 +376,7 @@ class CollectorOfThresholdSignatures {
 
         // TODO(GG): A clumsy way to do verification - find a better way ....
 
-        auto accWithVer = verifier->newAccumulator(true);
+        IThresholdAccumulator* accWithVer = verifier->newAccumulator(true);
         accWithVer->setExpectedDigest(reinterpret_cast<unsigned char*>(expectedDigest.content()), DIGEST_SIZE);
 
         uint16_t currNumOfValidShares = 0;
@@ -414,17 +390,9 @@ class CollectorOfThresholdSignatures {
 
         if (replicasWithBadSigs.size() == 0) {
           // TODO(GG): print warning / error ??
-          LOG_WARN(THRESHSIGN_LOG,
-                   typeid(PART).name() << ": verification failed for sequence: " << expectedSeqNumber
-                                       << ": no replicas with bad signatures");
-        } else {
-          std::ostringstream oss;
-          std::copy(
-              replicasWithBadSigs.begin(), replicasWithBadSigs.end(), std::ostream_iterator<std::uint16_t>(oss, " "));
-          LOG_WARN(THRESHSIGN_LOG,
-                   typeid(PART).name() << ": verification failed for sequence: " << expectedSeqNumber
-                                       << ": replicas with bad signatures: " << oss.str());
         }
+
+        verifier->release(accWithVer);
 
         auto iMsg(ExternalFunc::createInterCombinedSigFailed(expectedSeqNumber, expectedView, replicasWithBadSigs));
         repMsgsStorage->pushInternalMsg(std::move(iMsg));
@@ -441,7 +409,7 @@ class CollectorOfThresholdSignatures {
 
   class CombinedSigVerificationJob : public util::SimpleThreadPool::Job {
    private:
-    std::shared_ptr<IThresholdVerifier> verifier;
+    IThresholdVerifier* const verifier;
     IncomingMsgsStorage* const repMsgsStorage;
     const SeqNum expectedSeqNumber;
     const ViewNum expectedView;
@@ -453,7 +421,7 @@ class CollectorOfThresholdSignatures {
     virtual ~CombinedSigVerificationJob() {}
 
    public:
-    CombinedSigVerificationJob(std::shared_ptr<IThresholdVerifier> thresholdVerifier,
+    CombinedSigVerificationJob(IThresholdVerifier* const thresholdVerifier,
                                IncomingMsgsStorage* const replicaMsgsStorage,
                                SeqNum seqNum,
                                ViewNum view,
@@ -470,7 +438,6 @@ class CollectorOfThresholdSignatures {
           combinedSigLen{combinedSigLength} {
       memcpy(combinedSig, combinedSigBody, combinedSigLen);
       this->context = cnt;
-      LOG_TRACE(THRESHSIGN_LOG, KVLOG(expectedSeqNumber, expectedView, combinedSigLen));
     }
 
     virtual void release() override {
@@ -480,8 +447,6 @@ class CollectorOfThresholdSignatures {
     }
 
     virtual void execute() override {
-      SCOPED_MDC_SEQ_NUM(std::to_string(expectedSeqNumber));
-      MDC_PUT(MDC_THREAD_KEY, demangler::demangle<FULL>());
       bool succ = verifier->verify((char*)&expectedDigest, sizeof(Digest), combinedSig, combinedSigLen);
       auto iMsg(ExternalFunc::createInterVerifyCombinedSigResult(expectedSeqNumber, expectedView, succ));
       repMsgsStorage->pushInternalMsg(std::move(iMsg));

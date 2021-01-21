@@ -11,7 +11,6 @@
 
 #pragma once
 
-#include "OpenTracing.hpp"
 #include "messages/PreProcessRequestMsg.hpp"
 #include "messages/ClientPreProcessRequestMsg.hpp"
 #include "MsgsCommunicator.hpp"
@@ -24,8 +23,6 @@
 #include "Metrics.hpp"
 #include "Timers.hpp"
 #include "InternalReplicaApi.hpp"
-#include "PreProcessorRecorder.hpp"
-#include "diagnostics.h"
 
 #include <mutex>
 
@@ -37,11 +34,10 @@ struct ClientRequestState {
   // A list of requests passed a pre-processing consensus used for a non-determinism detection at later stage.
   static const uint8_t reqProcessingHistoryHeight = 30;
   std::deque<RequestProcessingStateUniquePtr> reqProcessingHistory;
-  uint64_t reqRetryId = 1;
 };
 
 typedef std::shared_ptr<ClientRequestState> ClientRequestStateSharedPtr;
-typedef std::unordered_map<uint16_t, ClientRequestStateSharedPtr> OngoingReqMap;  // clientId -> ClientRequestState map
+typedef std::unordered_map<uint16_t, ClientRequestStateSharedPtr> OngoingReqMap;
 
 //**************** Class PreProcessor ****************//
 
@@ -83,52 +79,39 @@ class PreProcessor {
   template <typename T>
   void onMessage(T *msg);
 
-  bool registerReplicaDependentRequest(ClientPreProcessReqMsgUniquePtr clientReqMsg,
-                                       PreProcessRequestMsgSharedPtr &preProcessRequestMsg,
-                                       uint64_t reqRetryId);
   bool registerRequest(ClientPreProcessReqMsgUniquePtr clientReqMsg,
                        PreProcessRequestMsgSharedPtr preProcessRequestMsg);
   void releaseClientPreProcessRequestSafe(uint16_t clientId, PreProcessingResult result);
-  void releaseClientPreProcessRequest(const ClientRequestStateSharedPtr &clientEntry,
-                                      uint16_t clientId,
-                                      PreProcessingResult result);
+  static void releaseClientPreProcessRequest(const ClientRequestStateSharedPtr &clientEntry,
+                                             uint16_t clientId,
+                                             PreProcessingResult result);
   bool validateMessage(MessageBase *msg) const;
   void registerMsgHandlers();
   bool checkClientMsgCorrectness(const ClientPreProcessReqMsgUniquePtr &clientReqMsg, ReqId reqSeqNum) const;
-  void handleClientPreProcessRequestByPrimary(PreProcessRequestMsgSharedPtr preProcessRequestMsg);
+  void handleClientPreProcessRequest(ClientPreProcessReqMsgUniquePtr clientReqMsg);
+  void handleClientPreProcessRequestByPrimary(ClientPreProcessReqMsgUniquePtr clientReqMsg);
   void handleClientPreProcessRequestByNonPrimary(ClientPreProcessReqMsgUniquePtr msg);
   void sendMsg(char *msg, NodeIdType dest, uint16_t msgType, MsgSize msgSize);
   void sendPreProcessRequestToAllReplicas(const PreProcessRequestMsgSharedPtr &preProcessReqMsg);
-  void resendPreProcessRequest(const RequestProcessingStateUniquePtr &clientReqStatePtr);
-  void sendRejectPreProcessReplyMsg(NodeIdType clientId,
-                                    NodeIdType senderId,
-                                    SeqNum reqSeqNum,
-                                    SeqNum ongoingReqSeqNum,
-                                    uint64_t reqRetryId,
-                                    const std::string &cid,
-                                    const std::string &ongoingCid);
-  uint16_t getClientReplyBufferId(uint16_t clientId) const { return clientId - numOfReplicas_ - numOfRoReplicas_; }
+  uint16_t getClientReplyBufferId(uint16_t clientId) const { return clientId - numOfReplicas_; }
   const char *getPreProcessResultBuffer(uint16_t clientId) const;
   void launchAsyncReqPreProcessingJob(const PreProcessRequestMsgSharedPtr &preProcessReqMsg,
                                       bool isPrimary,
                                       bool isRetry);
-  uint32_t launchReqPreProcessing(uint16_t clientId,
-                                  const std::string &cid,
-                                  ReqId reqSeqNum,
-                                  uint32_t reqLength,
-                                  char *reqBuf,
-                                  const concordUtils::SpanContext &span_context);
+  uint32_t launchReqPreProcessing(
+      uint16_t clientId, ReqId reqSeqNum, uint32_t reqLength, char *reqBuf, const std::string &span_context);
   void handleReqPreProcessingJob(const PreProcessRequestMsgSharedPtr &preProcessReqMsg, bool isPrimary, bool isRetry);
-  void handlePreProcessedReqByNonPrimary(
-      uint16_t clientId, ReqId reqSeqNum, uint64_t reqRetryId, uint32_t resBufLen, const std::string &cid);
+  void handlePreProcessedReqByNonPrimary(uint16_t clientId,
+                                         ReqId reqSeqNum,
+                                         uint32_t resBufLen,
+                                         const std::string &cid);
   void handlePreProcessedReqByPrimary(const PreProcessRequestMsgSharedPtr &preProcessReqMsg,
                                       uint16_t clientId,
                                       uint32_t resultBufLen);
-  void handlePreProcessedReqPrimaryRetry(NodeIdType clientId, uint32_t resultBufLen);
+  void handlePreProcessedReqPrimaryRetry(NodeIdType clientId, SeqNum reqSeqNum);
   void finalizePreProcessing(NodeIdType clientId);
   void cancelPreProcessing(NodeIdType clientId);
-  void setPreprocessingRightNow(uint16_t clientId, bool set);
-  PreProcessingResult handlePreProcessedReqByPrimaryAndGetConsensusResult(uint16_t clientId, uint32_t resultBufLen);
+  PreProcessingResult getPreProcessingConsensusResult(uint16_t clientId);
   void handlePreProcessReplyMsg(const std::string &cid,
                                 PreProcessingResult result,
                                 NodeIdType clientId,
@@ -153,10 +136,9 @@ class PreProcessor {
   bftEngine::IRequestsHandler &requestsHandler_;
   const InternalReplicaApi &myReplica_;
   const ReplicaId myReplicaId_;
-  const uint32_t maxPreExecResultSize_;
+  const uint32_t maxReplyMsgSize_;
   const std::set<ReplicaId> &idsOfPeerReplicas_;
   const uint16_t numOfReplicas_;
-  const uint16_t numOfRoReplicas_;
   const uint16_t numOfClients_;
   util::SimpleThreadPool threadPool_;
   // One-time allocated buffers (one per client) for the pre-execution results storage
@@ -173,16 +155,10 @@ class PreProcessor {
     concordMetrics::CounterHandle preProcessRequestTimedout;
     concordMetrics::CounterHandle preProcReqSentForFurtherProcessing;
     concordMetrics::CounterHandle preProcPossiblePrimaryFaultDetected;
-    concordMetrics::CounterHandle preProcReqForwardedByNonPrimaryNotIgnored;
-    concordMetrics::GaugeHandle preProcInFlyRequestsNum;
   } preProcessorMetrics_;
   concordUtil::Timers::Handle requestsStatusCheckTimer_;
-  concordUtil::Timers::Handle metricsTimer_;
   const uint64_t preExecReqStatusCheckPeriodMilli_;
   concordUtil::Timers &timers_;
-  PreProcessorRecorder histograms_;
-  concord::diagnostics::AsyncTimeRecorderMap<std::string> preExecuteDuration_;
-  ViewNum lastViewNum_;
 };
 
 //**************** Class AsyncPreProcessJob ****************//

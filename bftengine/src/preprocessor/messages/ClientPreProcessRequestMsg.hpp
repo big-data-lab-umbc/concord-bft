@@ -27,9 +27,7 @@ class ClientPreProcessRequestMsg : public ClientRequestMsg {
                              const char* request,
                              uint64_t reqTimeoutMilli,
                              const std::string& cid,
-                             const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  ClientPreProcessRequestMsg(MessageBase* msgBase) : ClientRequestMsg(msgBase) {}
+                             const std::string& span_context = "");
 
   std::unique_ptr<MessageBase> convertToClientRequestMsg(bool resetPreProcessFlag);
 };

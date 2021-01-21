@@ -50,7 +50,6 @@ class Sliver {
 
   bool empty() const;
   size_t length() const;
-  size_t size() const;
   const char* data() const;
   std::string_view string_view() const;
 

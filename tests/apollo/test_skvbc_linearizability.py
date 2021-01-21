@@ -40,7 +40,6 @@ def start_replica_cmd(builddir, replica_id):
             "-k", KEY_FILE_PREFIX,
             "-i", str(replica_id),
             "-s", statusTimerMilli,
-             "-e", str(True),
             "-v", viewChangeTimeoutMilli,
             "-p" if os.environ.get('BUILD_ROCKSDB_STORAGE', "").lower()
                     in set(["true", "on"])
@@ -53,9 +52,9 @@ class SkvbcChaosTest(unittest.TestCase):
     __test__ = False  # so that PyTest ignores this test scenario
 
     @with_trio
-    @with_bft_network(start_replica_cmd, rotate_keys=True)
+    @with_bft_network(start_replica_cmd)
     @verify_linearizability()
-    async def test_healthy(self, bft_network, tracker,exchange_keys=True):
+    async def test_healthy(self, bft_network, tracker):
         """
         Run a bunch of concurrrent requests in batches and verify
         linearizability. The system is healthy and stable and no faults are
@@ -69,14 +68,15 @@ class SkvbcChaosTest(unittest.TestCase):
         await tracker.run_concurrent_ops(num_ops)
 
     @with_trio
-    @with_bft_network(start_replica_cmd, rotate_keys=True)
+    @with_bft_network(start_replica_cmd)
     @verify_linearizability()
     async def test_wreak_havoc(self, bft_network, tracker):
         """
-        Run a bunch of concurrent requests in batches and verify
+        Run a bunch of concurrrent requests in batches and verify
         linearizability. In this test we generate faults periodically and verify
         linearizability at the end of the run.
         """
+
         num_ops = 500
 
         self.skvbc = kvbc.SimpleKVBCProtocol(bft_network)

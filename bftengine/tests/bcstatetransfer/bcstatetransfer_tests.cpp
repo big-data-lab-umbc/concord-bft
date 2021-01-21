@@ -31,65 +31,45 @@ using concord::storage::rocksdb::Client;
 using concord::storage::rocksdb::KeyComparator;
 #endif
 namespace bftEngine {
-namespace bcst {
+namespace SimpleBlockchainStateTransfer {
 
 using namespace impl;
 
 // Create a test config with small blocks and chunks for testing
 Config TestConfig() {
-  return {
-      1,                  // myReplicaId
-      1,                  // fVal
-      0,                  // cVal
-      4,                  // numReplicas
-      false,              // pedanticChecks
-      false,              // isReadOnly
-      128,                // maxChunkSize
-      128,                // maxNumberOfChunksInBatch
-      kMaxBlockSize,      // maxBlockSize
-      256 * 1024 * 1024,  // maxPendingDataFromSourceReplica
-      2048,               // maxNumOfReservedPages
-      4096,               // sizeOfReservedPage
-      300,                // refreshTimerMs
-      2500,               // checkpointSummariesRetransmissionTimeoutMs
-      60000,              // maxAcceptableMsgDelayMs
-      15000,              // sourceReplicaReplacementTimeoutMs
-      250,                // fetchRetransmissionTimeoutMs
-      5,                  // metricsDumpIntervalSec
-      false,              // runInSeparateThread
-      true                // enableReservedPages
-  };
+  Config config;
+  config.myReplicaId = 1;
+  config.fVal = 1;
+  config.numReplicas = 4;
+  config.maxBlockSize = kMaxBlockSize;
+  config.maxChunkSize = 128;
+  config.maxNumberOfChunksInBatch = 128;
+  return config;
 }
 
 // Test fixture for blockchain state transfer tests
 class BcStTest : public ::testing::Test {
  protected:
-  const std::string BCST_DB = "./bcst_db";
-
   void SetUp() override {
     // uncomment if needed
-    //    logging::Logger::getInstance("serializable").setLogLevel(TRACE_LOG_LEVEL);
-    //    logging::Logger::getInstance("concord.bft.st.dbdatastore").setLogLevel(TRACE_LOG_LEVEL);
-    //    logging::Logger::getInstance("rocksdb").setLogLevel(TRACE_LOG_LEVEL);
+    //      log4cplus::Logger::getInstance( LOG4CPLUS_TEXT("serializable")).setLogLevel(log4cplus::TRACE_LOG_LEVEL);
+    //      log4cplus::Logger::getInstance( LOG4CPLUS_TEXT("DBDataStore")).setLogLevel(log4cplus::TRACE_LOG_LEVEL);
+    //      log4cplus::Logger::getInstance( LOG4CPLUS_TEXT("rocksdb")).setLogLevel(log4cplus::TRACE_LOG_LEVEL);
 
-    DeleteBcStateTransferDbfolder();
     config_ = TestConfig();
     auto* db_key_comparator = new concord::kvbc::v1DirectKeyValue::DBKeyComparator();
 #ifdef USE_ROCKSDB
     concord::storage::IDBClient::ptr dbc(
-        new concord::storage::rocksdb::Client(BCST_DB, std::make_unique<KeyComparator>(db_key_comparator)));
+        new concord::storage::rocksdb::Client("./bcst_db", std::make_unique<KeyComparator>(db_key_comparator)));
     dbc->init();
-    auto* datastore = new DBDataStore(dbc,
-                                      config_.sizeOfReservedPage,
-                                      std::make_shared<concord::storage::v1DirectKeyValue::STKeyManipulator>(),
-                                      config_.enableReservedPages);
+    auto* datastore = new DBDataStore(
+        dbc, config_.sizeOfReservedPage, std::make_shared<concord::storage::v1DirectKeyValue::STKeyManipulator>());
 #else
     auto comparator = concord::storage::memorydb::KeyComparator(db_key_comparator);
     concord::storage::IDBClient::ptr dbc(new concord::storage::memorydb::Client(comparator));
     auto* datastore = new InMemoryDataStore(config_.sizeOfReservedPage);
 #endif
     st_ = new BCStateTran(config_, &app_state_, datastore);
-    st_->init(3, 32, 4096);
     ASSERT_FALSE(st_->isRunning());
     st_->startRunning(&replica_);
     ASSERT_TRUE(st_->isRunning());
@@ -100,14 +80,6 @@ class BcStTest : public ::testing::Test {
     // Must stop running before destruction
     st_->stopRunning();
     delete st_;
-    DeleteBcStateTransferDbfolder();
-  }
-
-  void DeleteBcStateTransferDbfolder() {
-    std::string cmd = string("rm -rf ") + BCST_DB;
-    if (system(cmd.c_str())) {
-      ASSERT_TRUE(false);
-    }
   }
 
   Config config_;
@@ -148,5 +120,5 @@ TEST(DBDataStore, API) {}
 
 TEST(DBDataStore, Transactions) {}
 
-}  // namespace bcst
+}  // namespace SimpleBlockchainStateTransfer
 }  // namespace bftEngine

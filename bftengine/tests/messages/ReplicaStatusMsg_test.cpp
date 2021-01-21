@@ -27,7 +27,8 @@ using namespace bftEngine;
 using namespace bftEngine::impl;
 
 TEST(ReplicaStatusMsg, viewActiveNoLists) {
-  ReplicasInfo replicaInfo(createReplicaConfig(), false, false);
+  auto config = createReplicaConfig();
+  ReplicasInfo replicaInfo(config, false, false);
   ReplicaId senderId = 1u;
   ViewNum viewNum = 2u;
   SeqNum lastStable = 150u;
@@ -49,7 +50,7 @@ TEST(ReplicaStatusMsg, viewActiveNoLists) {
                        listOfPrePrepareMsgsInActiveWindow,
                        listOfMissingViewChangeMsgForViewChange,
                        listOfMissingPrePrepareMsgForViewChange,
-                       concordUtils::SpanContext{spanContext});
+                       spanContext);
   EXPECT_EQ(msg.getViewNumber(), viewNum);
   EXPECT_EQ(msg.getLastStableSeqNum(), lastStable);
   EXPECT_EQ(msg.getLastExecutedSeqNum(), lastExecuted);
@@ -59,15 +60,6 @@ TEST(ReplicaStatusMsg, viewActiveNoLists) {
   EXPECT_EQ(msg.hasListOfMissingViewChangeMsgForViewChange(), listOfMissingViewChangeMsgForViewChange);
   EXPECT_EQ(msg.hasListOfMissingPrePrepareMsgForViewChange(), listOfMissingPrePrepareMsgForViewChange);
 
-  for (auto& id : replicaInfo.idsOfPeerReplicas()) {
-    EXPECT_FALSE(msg.hasComplaintFromReplica(id));
-    msg.setComplaintFromReplica(id);
-    EXPECT_TRUE(msg.hasComplaintFromReplica(id));
-  }
-  for (auto& id : replicaInfo.idsOfPeerReplicas()) {
-    EXPECT_TRUE(msg.hasComplaintFromReplica(id));
-  }
-
   EXPECT_NO_THROW(msg.validate(replicaInfo));
   /* the next methods crash the app with an assert ¯\_(ツ)_/¯
   EXPECT_FALSE(msg.isPrePrepareInActiveWindow(151));
@@ -75,10 +67,12 @@ TEST(ReplicaStatusMsg, viewActiveNoLists) {
   EXPECT_FALSE(msg.isMissingPrePrepareMsgForViewChange(151));
   */
   testMessageBaseMethods(msg, MsgCode::ReplicaStatus, senderId, spanContext);
+  destroyReplicaConfig(config);
 }
 
 TEST(ReplicaStatusMsg, haslistOfPrePrepareMsgsInActiveWindow) {
-  ReplicasInfo replicaInfo(createReplicaConfig(), false, false);
+  auto config = createReplicaConfig();
+  ReplicasInfo replicaInfo(config, false, false);
   ReplicaId senderId = 1u;
   ViewNum viewNum = 2u;
   SeqNum lastStable = 150u;
@@ -100,7 +94,7 @@ TEST(ReplicaStatusMsg, haslistOfPrePrepareMsgsInActiveWindow) {
                        listOfPrePrepareMsgsInActiveWindow,
                        listOfMissingViewChangeMsgForViewChange,
                        listOfMissingPrePrepareMsgForViewChange,
-                       concordUtils::SpanContext{spanContext});
+                       spanContext);
   EXPECT_EQ(msg.getViewNumber(), viewNum);
   EXPECT_EQ(msg.getLastStableSeqNum(), lastStable);
   EXPECT_EQ(msg.getLastExecutedSeqNum(), lastExecuted);
@@ -109,15 +103,6 @@ TEST(ReplicaStatusMsg, haslistOfPrePrepareMsgsInActiveWindow) {
   EXPECT_EQ(msg.hasListOfPrePrepareMsgsInActiveWindow(), listOfPrePrepareMsgsInActiveWindow);
   EXPECT_EQ(msg.hasListOfMissingViewChangeMsgForViewChange(), listOfMissingViewChangeMsgForViewChange);
   EXPECT_EQ(msg.hasListOfMissingPrePrepareMsgForViewChange(), listOfMissingPrePrepareMsgForViewChange);
-
-  for (auto& id : replicaInfo.idsOfPeerReplicas()) {
-    EXPECT_FALSE(msg.hasComplaintFromReplica(id));
-    msg.setComplaintFromReplica(id);
-    EXPECT_TRUE(msg.hasComplaintFromReplica(id));
-  }
-  for (auto& id : replicaInfo.idsOfPeerReplicas()) {
-    EXPECT_TRUE(msg.hasComplaintFromReplica(id));
-  }
 
   EXPECT_NO_THROW(msg.validate(replicaInfo));
   EXPECT_FALSE(msg.isPrePrepareInActiveWindow(151));
@@ -128,20 +113,18 @@ TEST(ReplicaStatusMsg, haslistOfPrePrepareMsgsInActiveWindow) {
   msg.setPrePrepareInActiveWindow(152);
   EXPECT_TRUE(msg.isPrePrepareInActiveWindow(152));
 
-  for (auto& id : replicaInfo.idsOfPeerReplicas()) {
-    EXPECT_TRUE(msg.hasComplaintFromReplica(id));
-  }
-
   EXPECT_NO_THROW(msg.validate(replicaInfo));
   /* the next methods crash the app with an assert ¯\_(ツ)_/¯
   EXPECT_FALSE(msg.isMissingViewChangeMsgForViewChange(senderId));
   EXPECT_FALSE(msg.isMissingPrePrepareMsgForViewChange(151));
   */
   testMessageBaseMethods(msg, MsgCode::ReplicaStatus, senderId, spanContext);
+  destroyReplicaConfig(config);
 }
 
 TEST(ReplicaStatusMsg, listOfMissingViewChangeMsgForViewChange) {
-  ReplicasInfo replicaInfo(createReplicaConfig(), false, false);
+  auto config = createReplicaConfig();
+  ReplicasInfo replicaInfo(config, false, false);
   ReplicaId senderId = 1u;
   ViewNum viewNum = 2u;
   SeqNum lastStable = 150u;
@@ -163,7 +146,7 @@ TEST(ReplicaStatusMsg, listOfMissingViewChangeMsgForViewChange) {
                        listOfPrePrepareMsgsInActiveWindow,
                        listOfMissingViewChangeMsgForViewChange,
                        listOfMissingPrePrepareMsgForViewChange,
-                       concordUtils::SpanContext{spanContext});
+                       spanContext);
   EXPECT_EQ(msg.getViewNumber(), viewNum);
   EXPECT_EQ(msg.getLastStableSeqNum(), lastStable);
   EXPECT_EQ(msg.getLastExecutedSeqNum(), lastExecuted);
@@ -184,9 +167,11 @@ TEST(ReplicaStatusMsg, listOfMissingViewChangeMsgForViewChange) {
   EXPECT_FALSE(msg.isMissingPrePrepareMsgForViewChange(151));
   */
   testMessageBaseMethods(msg, MsgCode::ReplicaStatus, senderId, spanContext);
+  destroyReplicaConfig(config);
 }
 
 TEST(ReplicaStatusMsg, listOfMissingPrePrepareMsgForViewChange) {
+  auto config = createReplicaConfig();
   ReplicaId senderId = 1u;
   ViewNum viewNum = 2u;
   SeqNum lastStable = 150u;
@@ -208,7 +193,7 @@ TEST(ReplicaStatusMsg, listOfMissingPrePrepareMsgForViewChange) {
                        listOfPrePrepareMsgsInActiveWindow,
                        listOfMissingViewChangeMsgForViewChange,
                        listOfMissingPrePrepareMsgForViewChange,
-                       concordUtils::SpanContext{spanContext});
+                       spanContext);
   EXPECT_EQ(msg.getViewNumber(), viewNum);
   EXPECT_EQ(msg.getLastStableSeqNum(), lastStable);
   EXPECT_EQ(msg.getLastExecutedSeqNum(), lastExecuted);
@@ -225,6 +210,7 @@ TEST(ReplicaStatusMsg, listOfMissingPrePrepareMsgForViewChange) {
   msg.setMissingPrePrepareMsgForViewChange(152);
   EXPECT_TRUE(msg.isMissingPrePrepareMsgForViewChange(152));
   testMessageBaseMethods(msg, MsgCode::ReplicaStatus, senderId, spanContext);
+  destroyReplicaConfig(config);
 }
 
 int main(int argc, char** argv) {

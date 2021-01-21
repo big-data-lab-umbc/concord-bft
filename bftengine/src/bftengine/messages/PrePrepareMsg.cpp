@@ -10,7 +10,6 @@
 // file.
 
 #include <bftengine/ClientMsgs.hpp>
-#include "OpenTracing.hpp"
 #include "PrePrepareMsg.hpp"
 #include "SysConsts.hpp"
 #include "Crypto.hpp"
@@ -64,36 +63,25 @@ void PrePrepareMsg::validate(const ReplicasInfo& repInfo) const {
 }
 
 PrePrepareMsg::PrePrepareMsg(ReplicaId sender, ViewNum v, SeqNum s, CommitPath firstPath, size_t size)
-    : PrePrepareMsg(sender, v, s, firstPath, concordUtils::SpanContext{}, size) {}
+    : PrePrepareMsg(sender, v, s, firstPath, "", size) {}
 
-PrePrepareMsg::PrePrepareMsg(ReplicaId sender,
-                             ViewNum v,
-                             SeqNum s,
-                             CommitPath firstPath,
-                             const concordUtils::SpanContext& spanContext,
-                             size_t size)
-    : PrePrepareMsg::PrePrepareMsg(sender, v, s, firstPath, spanContext, std::to_string(s), size) {}
-
-PrePrepareMsg::PrePrepareMsg(ReplicaId sender,
-                             ViewNum v,
-                             SeqNum s,
-                             CommitPath firstPath,
-                             const concordUtils::SpanContext& spanContext,
-                             const std::string& batchCid,
-                             size_t size)
+PrePrepareMsg::PrePrepareMsg(
+    ReplicaId sender, ViewNum v, SeqNum s, CommitPath firstPath, const std::string& spanContext, size_t size)
     : MessageBase(sender,
                   MsgCode::PrePrepare,
-                  spanContext.data().size(),
-                  (((size + sizeof(Header) + batchCid.size()) < maxMessageSize<PrePrepareMsg>())
-                       ? (size + sizeof(Header) + batchCid.size())
-                       : maxMessageSize<PrePrepareMsg>() - spanContext.data().size())) {
+                  spanContext.size(),
+                  (((size + sizeof(Header)) < maxMessageSize<PrePrepareMsg>())
+                       ? (size + sizeof(Header))
+                       : maxMessageSize<PrePrepareMsg>() - spanContext.size()))
+
+{
   bool ready = size == 0;  // if null, then message is ready
   if (!ready) {
     b()->digestOfRequests.makeZero();
   } else {
     b()->digestOfRequests = nullDigest;
   }
-  b()->batchCidLength = batchCid.size();
+
   b()->endLocationOfLastRequest = payloadShift();
   b()->flags = computeFlagsForPrePrepareMsg(ready, ready, firstPath);
   b()->numberOfRequests = 0;
@@ -101,9 +89,7 @@ PrePrepareMsg::PrePrepareMsg(ReplicaId sender,
   b()->viewNum = v;
 
   char* position = body() + sizeof(Header);
-  memcpy(position, spanContext.data().data(), b()->header.spanContextSize);
-  position += spanContext.data().size();
-  memcpy(position, batchCid.data(), b()->batchCidLength);
+  memcpy(position, spanContext.data(), b()->header.spanContextSize);
 }
 
 uint32_t PrePrepareMsg::remainingSizeForRequests() const {
@@ -113,8 +99,6 @@ uint32_t PrePrepareMsg::remainingSizeForRequests() const {
 
   return (internalStorageSize() - b()->endLocationOfLastRequest);
 }
-
-uint32_t PrePrepareMsg::requestsSize() const { return (b()->endLocationOfLastRequest - prePrepareHeaderPrefix); }
 
 void PrePrepareMsg::addRequest(const char* pRequest, uint32_t requestSize) {
   ConcordAssert(getRequestSizeTemp(pRequest) == requestSize);
@@ -233,9 +217,7 @@ const std::string PrePrepareMsg::getBatchCorrelationIdAsString() const {
   return ret;
 }
 
-uint32_t PrePrepareMsg::payloadShift() const {
-  return sizeof(Header) + b()->batchCidLength + b()->header.spanContextSize;
-}
+uint32_t PrePrepareMsg::payloadShift() const { return sizeof(Header) + b()->header.spanContextSize; }
 
 ///////////////////////////////////////////////////////////////////////////////
 // RequestsIterator
@@ -278,10 +260,6 @@ bool RequestsIterator::getAndGoToNext(char*& pRequest) {
   gotoNext();
 
   return true;
-}
-
-std::string PrePrepareMsg::getCid() const {
-  return std::string(this->body() + this->payloadShift() - b()->batchCidLength, b()->batchCidLength);
 }
 
 }  // namespace impl

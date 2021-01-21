@@ -28,6 +28,7 @@ class DebugPersistentStorage : public PersistentStorage {
   uint8_t beginWriteTran() override;
   uint8_t endWriteTran() override;
   bool isInWriteTran() const override;
+  void setReplicaConfig(const ReplicaConfig& config) override;
   void setLastExecutedSeqNum(SeqNum seqNum) override;
   void setPrimaryLastUsedSeqNum(SeqNum seqNum) override;
   void setStrictLowerBoundOfSeqNums(SeqNum seqNum) override;
@@ -45,6 +46,8 @@ class DebugPersistentStorage : public PersistentStorage {
   void setCommitFullMsgInSeqNumWindow(SeqNum seqNum, CommitFullMsg* msg) override;
   void setCheckpointMsgInCheckWindow(SeqNum seqNum, CheckpointMsg* msg) override;
   void setCompletedMarkInCheckWindow(SeqNum seqNum, bool mark) override;
+  bool hasReplicaConfig() const override;
+  ReplicaConfig getReplicaConfig() override;
   SeqNum getLastExecutedSeqNum() override;
   SeqNum getPrimaryLastUsedSeqNum() override;
   SeqNum getStrictLowerBoundOfSeqNums() override;
@@ -64,9 +67,6 @@ class DebugPersistentStorage : public PersistentStorage {
   CommitFullMsg* getAndAllocateCommitFullMsgInSeqNumWindow(SeqNum seqNum) override;
   CheckpointMsg* getAndAllocateCheckpointMsgInCheckWindow(SeqNum seqNum) override;
   bool getCompletedMarkInCheckWindow(SeqNum seqNum) override;
-  void setEraseMetadataStorageFlag() override {}
-  bool getEraseMetadataStorageFlag() override { return false; };
-  void eraseMetadata() override{};
 
  protected:
   bool setIsAllowed() const;
@@ -78,7 +78,8 @@ class DebugPersistentStorage : public PersistentStorage {
 
   uint8_t numOfNestedTransactions = 0;
 
-  ReplicaConfig& config_;  // TODO [TK] remove, use ReplicaConfig::instance()
+  bool hasConfig_ = false;
+  ReplicaConfig config_;
 
   SeqNum lastExecutedSeqNum_ = 0;
   SeqNum primaryLastUsedSeqNum_ = 0;

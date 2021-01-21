@@ -15,11 +15,8 @@
 #include "messages/AskForCheckpointMsg.hpp"
 #include "CheckpointInfo.hpp"
 #include "Logger.hpp"
-#include "kvstream.h"
 #include "PersistentStorage.hpp"
 #include "ClientsManager.hpp"
-#include "MsgsCommunicator.hpp"
-#include "KeyStore.h"
 
 using concordUtil::Timers;
 
@@ -28,9 +25,11 @@ namespace bftEngine::impl {
 ReadOnlyReplica::ReadOnlyReplica(const ReplicaConfig &config,
                                  IStateTransfer *stateTransfer,
                                  std::shared_ptr<MsgsCommunicator> msgComm,
+                                 std::shared_ptr<PersistentStorage> persistentStorage,
                                  std::shared_ptr<MsgHandlersRegistrator> msgHandlerReg,
                                  concordUtil::Timers &timers)
     : ReplicaForStateTransfer(config, stateTransfer, msgComm, msgHandlerReg, true, timers),
+      ps_(persistentStorage),
       ro_metrics_{metrics_.RegisterCounter("receivedCheckpointMsgs"),
                   metrics_.RegisterCounter("sentAskForCheckpointMsgs"),
                   metrics_.RegisterCounter("receivedInvalidMsgs"),
@@ -40,20 +39,21 @@ ReadOnlyReplica::ReadOnlyReplica(const ReplicaConfig &config,
                                    bind(&ReadOnlyReplica::messageHandler<CheckpointMsg>, this, std::placeholders::_1));
   metrics_.Register();
   // must be initialized although is not used by ReadOnlyReplica for proper behavior of StateTransfer
-  ClientsManager::setNumResPages(
-      (config.numOfClientProxies + config.numOfExternalClients + config.numReplicas) *
-      ClientsManager::reservedPagesPerClient(config.sizeOfReservedPage, config.maxReplyMessageSize));
-  ClusterKeyStore::setNumResPages(config.numReplicas);
+  ClientsManager::setNumResPages((config.numOfClientProxies + config.numOfExternalClients) *
+                                 config.maxReplyMessageSize / config.sizeOfReservedPage);
 }
 
 void ReadOnlyReplica::start() {
   ReplicaForStateTransfer::start();
+  ps_->beginWriteTran();
+  ps_->setReplicaConfig(config_);
+  ps_->endWriteTran();
+  lastExecutedSeqNum = ps_->getLastExecutedSeqNum();
   askForCheckpointMsgTimer_ = timers_.add(std::chrono::seconds(5),  // TODO [TK] config
                                           Timers::Timer::RECURRING,
                                           [this](Timers::Handle) {
                                             if (!this->isCollectingState()) sendAskForCheckpointMsg();
                                           });
-  msgsCommunicator_->startMsgsProcessing(config_.replicaId);
 }
 
 void ReadOnlyReplica::stop() {
@@ -61,9 +61,11 @@ void ReadOnlyReplica::stop() {
   ReplicaForStateTransfer::stop();
 }
 
-void ReadOnlyReplica::onTransferringCompleteImp(uint64_t newStateCheckpoint) {
-  lastExecutedSeqNum = newStateCheckpoint * checkpointWindowSize;
-
+void ReadOnlyReplica::onTransferringCompleteImp(int64_t newStateCheckpoint) {
+  lastExecutedSeqNum = newStateCheckpoint;
+  ps_->beginWriteTran();
+  ps_->setLastExecutedSeqNum(lastExecutedSeqNum);
+  ps_->endWriteTran();
   ro_metrics_.last_executed_seq_num_.Get().Set(lastExecutedSeqNum);
 }
 
@@ -88,7 +90,10 @@ void ReadOnlyReplica::onMessage<CheckpointMsg>(CheckpointMsg *msg) {
   const Digest msgDigest = msg->digestOfState();
   const bool msgIsStable = msg->isStableState();
 
-  LOG_INFO(GL, KVLOG(msgSenderId, msgSeqNum, msg->size(), msgIsStable) << ", digest: " << msgDigest.toString());
+  LOG_INFO(GL,
+           "Node " << config_.replicaId << " received Checkpoint message from node " << msgSenderId << " for seqNumber "
+                   << msgSeqNum << " (size=" << msg->size() << ", stable=" << (msgIsStable ? "true" : "false")
+                   << ", digestPrefix=" << *((int *)(&msgDigest)) << ")");
 
   // not relevant
   if (!msgIsStable || msgSeqNum <= lastExecutedSeqNum) return;
@@ -100,8 +105,9 @@ void ReadOnlyReplica::onMessage<CheckpointMsg>(CheckpointMsg *msg) {
   CheckpointMsg *x = new CheckpointMsg(msgSenderId, msgSeqNum, msgDigest, msgIsStable);
   tableOfStableCheckpoints[msgSenderId] = x;
   LOG_INFO(GL,
-           "Added stable Checkpoint message to tableOfStableCheckpoints (message from node "
-               << msgSenderId << " for seqNumber " << msgSeqNum << ")");
+           "Node " << config_.replicaId
+                   << " added stable Checkpoint message to tableOfStableCheckpoints (message from node " << msgSenderId
+                   << " for seqNumber " << msgSeqNum << ")");
 
   // not enough CheckpointMsg's
   if ((uint16_t)tableOfStableCheckpoints.size() < config_.fVal + 1) return;

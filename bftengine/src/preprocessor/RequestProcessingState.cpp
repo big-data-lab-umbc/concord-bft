@@ -18,92 +18,65 @@ using namespace chrono;
 using namespace concord::util;
 
 uint16_t RequestProcessingState::numOfRequiredEqualReplies_ = 0;
-PreProcessorRecorder *RequestProcessingState::preProcessorHistograms_ = nullptr;
 
 uint64_t RequestProcessingState::getMonotonicTimeMilli() {
   steady_clock::time_point curTimePoint = steady_clock::now();
   return duration_cast<milliseconds>(curTimePoint.time_since_epoch()).count();
 }
 
-void RequestProcessingState::init(uint16_t numOfRequiredReplies, PreProcessorRecorder *histograms) {
-  LOG_INFO(logger(), KVLOG(numOfRequiredReplies));
-  numOfRequiredEqualReplies_ = numOfRequiredReplies;
-  preProcessorHistograms_ = histograms;
-}
+void RequestProcessingState::init(uint16_t numOfRequiredReplies) { numOfRequiredEqualReplies_ = numOfRequiredReplies; }
 
 RequestProcessingState::RequestProcessingState(uint16_t numOfReplicas,
                                                uint16_t clientId,
-                                               const string &cid,
                                                ReqId reqSeqNum,
                                                ClientPreProcessReqMsgUniquePtr clientReqMsg,
                                                PreProcessRequestMsgSharedPtr preProcessRequestMsg)
     : numOfReplicas_(numOfReplicas),
       clientId_(clientId),
-      cid_(cid),
       reqSeqNum_(reqSeqNum),
       entryTime_(getMonotonicTimeMilli()),
       clientPreProcessReqMsg_(move(clientReqMsg)),
       preProcessRequestMsg_(preProcessRequestMsg) {
-  SCOPED_MDC_CID(cid);
-  LOG_DEBUG(logger(), "Created RequestProcessingState with" << KVLOG(reqSeqNum, clientId, numOfReplicas_));
+  LOG_DEBUG(logger(), "Created RequestProcessingState with " << KVLOG(reqSeqNum, numOfReplicas_));
 }
 
 void RequestProcessingState::setPreProcessRequest(PreProcessRequestMsgSharedPtr preProcessReqMsg) {
   if (preProcessRequestMsg_ != nullptr) {
-    SCOPED_MDC_CID(preProcessReqMsg->getCid());
-    const auto reqSeqNum = preProcessRequestMsg_->reqSeqNum();
-    LOG_ERROR(logger(), "preProcessRequestMsg_ is already set;" << KVLOG(reqSeqNum, clientId_));
+    LOG_ERROR(logger(),
+              "preProcessRequestMsg_ is already set; " << KVLOG(clientId_)
+                                                       << ", reqSeqNum: " << preProcessRequestMsg_->reqSeqNum());
     return;
   }
   preProcessRequestMsg_ = preProcessReqMsg;
-  reqRetryId_ = preProcessRequestMsg_->reqRetryId();
 }
 
 void RequestProcessingState::handlePrimaryPreProcessed(const char *preProcessResult, uint32_t preProcessResultLen) {
-  preprocessingRightNow_ = false;
   primaryPreProcessResult_ = preProcessResult;
   primaryPreProcessResultLen_ = preProcessResultLen;
   primaryPreProcessResultHash_ =
       convertToArray(SHA3_256().digest(primaryPreProcessResult_, primaryPreProcessResultLen_).data());
 }
 
-void RequestProcessingState::releaseResources() {
-  clientPreProcessReqMsg_.reset();
-  preProcessRequestMsg_.reset();
-}
-
 void RequestProcessingState::detectNonDeterministicPreProcessing(const SHA3_256::Digest &newHash,
-                                                                 NodeIdType newSenderId,
-                                                                 uint64_t reqRetryId) const {
-  SCOPED_MDC_CID(cid_);
+                                                                 NodeIdType newSenderId) const {
   for (auto &hashArray : preProcessingResultHashes_)
-    if ((newHash != hashArray.first) && reqRetryId_ && (reqRetryId_ == reqRetryId)) {
-      // Compare only between matching request/reply retry ids
-      LOG_INFO(logger(),
-               "Received pre-processing result hash is different from calculated by other replica"
-                   << KVLOG(reqSeqNum_, clientId_, newSenderId));
+    if (newHash != hashArray.first) {
+      LOG_WARN(logger(),
+               "Received pre-processing result hash is different from calculated by other replica "
+                   << KVLOG(reqSeqNum_, clientId_, newSenderId) << " newHash: " << newHash.data()
+                   << " hash: " << hashArray.first.data());
     }
 }
 
-void RequestProcessingState::detectNonDeterministicPreProcessing(const uint8_t *newHash,
-                                                                 NodeIdType senderId,
-                                                                 uint64_t reqRetryId) const {
-  detectNonDeterministicPreProcessing(convertToArray(newHash), senderId, reqRetryId);
+void RequestProcessingState::detectNonDeterministicPreProcessing(const uint8_t *newHash, NodeIdType senderId) const {
+  detectNonDeterministicPreProcessing(convertToArray(newHash), senderId);
 }
 
 void RequestProcessingState::handlePreProcessReplyMsg(const PreProcessReplyMsgSharedPtr &preProcessReplyMsg) {
-  const auto &senderId = preProcessReplyMsg->senderId();
-  if (preProcessReplyMsg->status() == STATUS_GOOD) {
-    numOfReceivedReplies_++;
-    concord::diagnostics::TimeRecorder scoped_timer(*preProcessorHistograms_->convertAndCompareHashes);
-    const auto &newHashArray = convertToArray(preProcessReplyMsg->resultsHash());
-    preProcessingResultHashes_[newHashArray]++;  // Count equal hashes
-    detectNonDeterministicPreProcessing(newHashArray, senderId, preProcessReplyMsg->reqRetryId());
-  } else {
-    SCOPED_MDC_CID(cid_);
-    LOG_DEBUG(logger(), "Register rejected PreProcessReplyMsg" << KVLOG(senderId, reqSeqNum_, clientId_));
-    rejectedReplicaIds_.push_back(preProcessReplyMsg->senderId());
-  }
+  numOfReceivedReplies_++;
+  const auto newHashArray = convertToArray(preProcessReplyMsg->resultsHash());
+  preProcessingResultHashes_[newHashArray]++;  // Count equal hashes
+  detectNonDeterministicPreProcessing(newHashArray, preProcessReplyMsg->senderId());
 }
 
 SHA3_256::Digest RequestProcessingState::convertToArray(const uint8_t resultsHash[SHA3_256::SIZE_IN_BYTES]) {
@@ -124,17 +97,16 @@ auto RequestProcessingState::calculateMaxNbrOfEqualHashes(uint16_t &maxNumOfEqua
   return itOfChosenHash;
 }
 
-bool RequestProcessingState::isReqTimedOut() const {
+bool RequestProcessingState::isReqTimedOut(bool isPrimary) const {
   if (!clientPreProcessReqMsg_) return false;
 
-  SCOPED_MDC_CID(cid_);
-  LOG_DEBUG(logger(), KVLOG(preprocessingRightNow_));
-  if (!preprocessingRightNow_) {
-    // Check request timeout once an asynchronous pre-execution completed (to not abort the execution thread)
+  if (!isPrimary || primaryPreProcessResultLen_ != 0) {
+    // On the primary: check request timeout once an asynchronous pre-execution completed (to not abort the execution
+    // thread)
     auto reqProcessingTime = getMonotonicTimeMilli() - entryTime_;
     if (reqProcessingTime > clientPreProcessReqMsg_->requestTimeoutMilli()) {
       LOG_WARN(logger(),
-               "Request timeout of " << clientPreProcessReqMsg_->requestTimeoutMilli() << " ms expired for"
+               "Request timeout of " << clientPreProcessReqMsg_->requestTimeoutMilli() << " ms expired for "
                                      << KVLOG(reqSeqNum_, clientId_, reqProcessingTime));
       return true;
     }
@@ -144,13 +116,7 @@ bool RequestProcessingState::isReqTimedOut() const {
 
 // The primary replica logic
 PreProcessingResult RequestProcessingState::definePreProcessingConsensusResult() {
-  SCOPED_MDC_CID(cid_);
-  if (numOfReceivedReplies_ < numOfRequiredEqualReplies_) {
-    LOG_DEBUG(logger(),
-              "Not enough replies received, continue waiting"
-                  << KVLOG(reqSeqNum_, numOfReceivedReplies_, numOfRequiredEqualReplies_));
-    return CONTINUE;
-  }
+  if (numOfReceivedReplies_ < numOfRequiredEqualReplies_) return CONTINUE;
 
   uint16_t maxNumOfEqualHashes = 0;
   auto itOfChosenHash = calculateMaxNbrOfEqualHashes(maxNumOfEqualHashes);
@@ -166,22 +132,18 @@ PreProcessingResult RequestProcessingState::definePreProcessingConsensusResult()
       retrying_ = true;
       return RETRY_PRIMARY;
     }
-    LOG_DEBUG(logger(), "Primary replica did not complete pre-processing yet, continue waiting" << KVLOG(reqSeqNum_));
+
+    LOG_DEBUG(logger(),
+              "Primary replica did not complete pre-processing yet for " << KVLOG(reqSeqNum_) << "; continue");
     return CONTINUE;
-  } else
-    LOG_DEBUG(
-        logger(),
-        "Not enough equal hashes collected yet" << KVLOG(reqSeqNum_, maxNumOfEqualHashes, numOfRequiredEqualReplies_));
+  }
 
   if (numOfReceivedReplies_ == numOfReplicas_ - 1) {
     // Replies from all replicas received, but not enough equal hashes collected => pre-execution consensus not
     // reached => cancel request.
-    LOG_WARN(logger(), "Not enough equal hashes collected, cancel request" << KVLOG(reqSeqNum_));
+    LOG_WARN(logger(), "Not enough equal hashes collected for " << KVLOG(reqSeqNum_) << ", cancel request");
     return CANCEL;
   }
-  LOG_DEBUG(logger(),
-            "Continue waiting for replies to arrive"
-                << KVLOG(reqSeqNum_, numOfReceivedReplies_, maxNumOfEqualHashes, numOfRequiredEqualReplies_));
   return CONTINUE;
 }
 

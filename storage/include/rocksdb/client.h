@@ -19,15 +19,10 @@
 
 #ifdef USE_ROCKSDB
 #include "Logger.hpp"
-#include <rocksdb/db.h>
 #include <rocksdb/utilities/transaction_db.h>
 #include <rocksdb/sst_file_manager.h>
 #include "storage/db_interface.h"
 #include "storage/storage_metrics.h"
-
-#include <map>
-#include <optional>
-#include <vector>
 
 namespace concord {
 namespace storage {
@@ -66,18 +61,15 @@ class ClientIterator : public concord::storage::IDBClient::IDBClientIterator {
 
 class Client : public concord::storage::IDBClient {
  public:
-  Client(const std::string& _dbPath) : m_dbPath(_dbPath) {}
-  Client(const std::string& _dbPath, std::unique_ptr<const ::rocksdb::Comparator>&& comparator)
+  Client(std::string _dbPath) : m_dbPath(_dbPath) {}
+  Client(std::string _dbPath, std::unique_ptr<const ::rocksdb::Comparator>&& comparator)
       : m_dbPath(_dbPath), comparator_(std::move(comparator)) {}
 
   ~Client() {
-    // Clear column family handles before the DB as handle destruction calls a DB instance member and we want that to
-    // happen before we delete the DB pointer.
-    cf_handles_.clear();
     if (txn_db_) {
       // If we're using a TransactionDB, it wraps the base DB, so release it
       // instead of releasing the base DB.
-      (void)dbInstance_.release();
+      dbInstance_.release();
       delete txn_db_;
     }
   }
@@ -104,58 +96,25 @@ class Client : public concord::storage::IDBClient {
     storage_metrics_.setAggregator(aggregator);
   }
 
+ private:
+  concordUtils::Status launchBatchJob(::rocksdb::WriteBatch& _batchJob);
+  concordUtils::Status get(const concordUtils::Sliver& _key, std::string& _value) const;
+  bool keyIsBefore(const concordUtils::Sliver& _lhs, const concordUtils::Sliver& _rhs) const;
   static logging::Logger& logger() {
     static logging::Logger logger_ = logging::getLogger("concord.storage.rocksdb");
     return logger_;
   }
-
- private:
-  struct Options {
-    ::rocksdb::Options db_options;
-    ::rocksdb::TransactionDBOptions txn_options;
-
-    void applyOptimizations();
-  };
-
-  // Initialize a DB.
-  // If Options are provided, use them as is.
-  // If Options are not provided, try to load them from an options file.
-  // If `applyOptimizations` is set, apply optimizations on top of the provided or the loaded ones.
-  void initDB(bool readOnly, const std::optional<Options>&, bool applyOptimizations);
-  concordUtils::Status launchBatchJob(::rocksdb::WriteBatch& _batchJob);
-  concordUtils::Status get(const concordUtils::Sliver& _key, std::string& _value) const;
-  bool keyIsBefore(const concordUtils::Sliver& _lhs, const concordUtils::Sliver& _rhs) const;
-
-  // Column family unique pointers that are managed solely by Client. This allows us to use a raw
-  // pointer in CfDeleter as we know the column family unique pointer will not be moved out of Client.
-  struct CfDeleter {
-    void operator()(::rocksdb::ColumnFamilyHandle* h) const noexcept {
-      if (!client_->dbInstance_->DestroyColumnFamilyHandle(h).ok()) {
-        std::terminate();
-      }
-    }
-    Client* client_{nullptr};
-  };
-  using CfUniquePtr = std::unique_ptr<::rocksdb::ColumnFamilyHandle, CfDeleter>;
-
-  // Guard against double init.
-  bool initialized_{false};
-
   // Database path on directory (used for connection).
   std::string m_dbPath;
 
   std::string default_opt_config_name = "OPTIONS_DEFAULT.ini";
-
   // Database object (created on connection).
   std::unique_ptr<::rocksdb::DB> dbInstance_;
   ::rocksdb::TransactionDB* txn_db_ = nullptr;
   std::unique_ptr<const ::rocksdb::Comparator> comparator_;
-  std::map<std::string, CfUniquePtr> cf_handles_;
 
   // Metrics
   mutable RocksDbStorageMetrics storage_metrics_;
-
-  friend class NativeClient;
 };
 
 ::rocksdb::Slice toRocksdbSlice(const concordUtils::Sliver& _s);

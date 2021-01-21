@@ -22,7 +22,6 @@
 #include <string>
 #include <array>
 #include <cstdint>
-#include <optional>
 
 #include "Logger.hpp"
 #include "SimpleBCStateTransfer.hpp"
@@ -34,11 +33,6 @@
 #include "Metrics.hpp"
 #include "SourceSelector.hpp"
 #include "callback_registry.hpp"
-#include "Handoff.hpp"
-#include "SysConsts.hpp"
-#include "throughput.hpp"
-#include "diagnostics.h"
-#include "performance_handler.h"
 
 using std::set;
 using std::map;
@@ -46,9 +40,8 @@ using std::string;
 using concordMetrics::StatusHandle;
 using concordMetrics::GaugeHandle;
 using concordMetrics::CounterHandle;
-using concord::util::Throughput;
 
-namespace bftEngine::bcst::impl {
+namespace bftEngine::SimpleBlockchainStateTransfer::impl {
 
 class BCStateTran : public IStateTransfer {
  public:
@@ -86,29 +79,19 @@ class BCStateTran : public IStateTransfer {
   void saveReservedPage(uint32_t reservedPageId, uint32_t copyLength, const char* inReservedPage) override;
   void zeroReservedPage(uint32_t reservedPageId) override;
 
-  void onTimer() override { timerHandler_(); };
-  void handleStateTransferMessage(char* msg, uint32_t msgLen, uint16_t senderId) override {
-    messageHandler_(msg, msgLen, senderId);
-  };
+  void onTimer() override;
+  void handleStateTransferMessage(char* msg, uint32_t msgLen, uint16_t senderId) override;
 
   std::string getStatus() override;
 
   void addOnTransferringCompleteCallback(std::function<void(uint64_t)>) override;
 
-  void setEraseMetadataFlag() override { psd_->setEraseDataStoreFlag(); }
-
  protected:
-  // handling messages from other context
   std::function<void(char*, uint32_t, uint16_t)> messageHandler_;
+  // actual handling function. can be used in context of dedicated thread
   void handleStateTransferMessageImp(char* msg, uint32_t msgLen, uint16_t senderId);
-  void handoffMsg(char* msg, uint32_t msgLen, uint16_t senderId) {
-    handoff_->push(std::bind(&BCStateTran::handleStateTransferMessageImp, this, msg, msgLen, senderId));
-  }
-
-  // handling timer from other context
-  std::function<void()> timerHandler_;
-  void onTimerImp();
-  void handoffTimer() { handoff_->push(std::bind(&BCStateTran::onTimerImp, this)); }
+  // handling from other context
+  void handoff(char* msg, uint32_t msgLen, uint16_t senderId);
 
   ///////////////////////////////////////////////////////////////////////////
   // Constants
@@ -136,8 +119,8 @@ class BCStateTran : public IStateTransfer {
   uint64_t maxNumOfStoredCheckpoints_;
   uint64_t numberOfReservedPages_;
 
-  std::atomic<bool> running_ = false;
-  std::unique_ptr<concord::util::Handoff> handoff_;
+  bool running_ = false;
+
   IReplicaForStateTransfer* replicaForStateTransfer_ = nullptr;
 
   char* buffer_;  // temporary buffer
@@ -145,9 +128,6 @@ class BCStateTran : public IStateTransfer {
   // random generator
   std::random_device randomDevice_;
   std::mt19937 randomGen_;
-
-  // get ST client or ST server logger according to getFetchingState()
-  logging::Logger& getLogger() const { return (psd_->getIsFetchingState() ? ST_DST_LOG : ST_SRC_LOG); }
 
   ///////////////////////////////////////////////////////////////////////////
   // Unique message IDs
@@ -179,8 +159,6 @@ class BCStateTran : public IStateTransfer {
 
   FetchingState getFetchingState() const;
   bool isFetching() const;
-
-  inline std::string getSequenceNumber(uint16_t replicaId, uint64_t seqNum, uint16_t = 0, uint64_t = 0);
 
   ///////////////////////////////////////////////////////////////////////////
   // Send messages
@@ -356,6 +334,7 @@ class BCStateTran : public IStateTransfer {
   concordMetrics::Component metrics_component_;
   struct Metrics {
     StatusHandle fetching_state_;
+    StatusHandle pedantic_checks_enabled_;
     StatusHandle preferred_replicas_;
 
     GaugeHandle current_source_replica_;
@@ -410,55 +389,11 @@ class BCStateTran : public IStateTransfer {
     CounterHandle on_timer_;
 
     CounterHandle on_transferring_complete_;
-
-    GaugeHandle overall_blocks_collected_;
-    GaugeHandle overall_blocks_throughtput_;
-    GaugeHandle overall_bytes_collected_;
-    GaugeHandle overall_bytes_throughtput_;
-    GaugeHandle prev_win_blocks_collected_;
-    GaugeHandle prev_win_blocks_throughtput_;
-    GaugeHandle prev_win_bytes_collected_;
-    GaugeHandle prev_win_bytes_throughtput_;
   };
 
   mutable Metrics metrics_;
 
   concord::util::CallbackRegistry<uint64_t> on_transferring_complete_cb_registry_;
+};
 
-  ///////////////////////////////////////////////////////////////////////////
-  // Internal Statistics
-  ///////////////////////////////////////////////////////////////////////////
- protected:
-  static constexpr uint32_t get_missing_blocks_summary_window_size = checkpointWindowSize;
-  Throughput blocks_collected_;
-  Throughput bytes_collected_;
-  std::optional<uint64_t> first_collected_block_num_;
-
-  // used to print periodic summary of recent checkpoints, and collected date while in state GettingMissingBlocks
-  void logCollectingStatus(const uint64_t firstRequiredBlock);
-  void reportCollectingStatus(const uint64_t firstRequiredBlock, const uint32_t actualBlockSize);
-  void startCollectingStats();
-
-  ///////////////////////////////////////////////////////////////////////////
-  // Latency Historgrams
-  ///////////////////////////////////////////////////////////////////////////
- private:
-  static constexpr int64_t MAX_VALUE_MILLISECONDS = 1000 * 60;  // 60 Seconds
-  using Recorder = concord::diagnostics::Recorder;
-
-  struct Recorders {
-    Recorders() {
-      auto& registrar = concord::diagnostics::RegistrarSingleton::getInstance();
-      registrar.perf.registerComponent("state_transfer", {fetch_blocks_msg_latency});
-    }
-    std::shared_ptr<Recorder> fetch_blocks_msg_latency =
-        std::make_shared<Recorder>(1, MAX_VALUE_MILLISECONDS, 3, concord::diagnostics::Unit::MILLISECONDS);
-  };
-  Recorders histograms_;
-
-  // Record latency for FetchBlockMsg <-> ItemDataMsg. These messages are sent multiple times between dest and src
-  concord::diagnostics::AsyncTimeRecorderMap<SeqNum, true> fetch_block_msg_latency_rec_;
-
-};  // namespace bftEngine::bcst::impl
-
-}  // namespace bftEngine::bcst::impl
+}  // namespace bftEngine::SimpleBlockchainStateTransfer::impl

@@ -21,12 +21,10 @@
 #include "sliver.hpp"
 #include "sparse_merkle/tree.h"
 #include "storage/db_interface.h"
-#include "Statistics.hpp"
 
 #include <future>
 #include <memory>
 #include <optional>
-#include <unordered_set>
 #include <utility>
 
 namespace concord::kvbc::v2MerkleTree {
@@ -49,25 +47,13 @@ namespace concord::kvbc::v2MerkleTree {
 // getLastReachableBlockId() + 1. Additionally, ReachableSTBlock <= getLatestBlockId().
 class DBAdapter : public IDbAdapter {
  public:
-  using NonProvableKeySet = std::unordered_set<Key>;
-
-  // Unless explicitly turned off, the constructor will try to link the blockchain with any blocks in the temporary
-  // state transfer chain. This is done so that the DBAdapter will operate correctly in case a crash or an abnormal
-  // shutdown has occurred prior to startup (construction). Only a single DBAdapter instance should operate on a
-  // database and access to all methods should be either done from a single thread or serialized via a mutex or another
-  // mechanism. The constructor throws if an error occurs.
-  // Note1: The passed DB client must be initialized beforehand.
-  // Note2: The 'linkTempSTChain' parameter turns of chain linking and is used for testing/tooling purposes.
-  // Note3: The key provided via 'nonProvableKeySet' parameter will be stored outside of the Merkle Tree,
-  // the keys must have the same size!
-  // Note4: Non-provable keys cannot be deleted for now.
-  DBAdapter(const std::shared_ptr<concord::storage::IDBClient> &db,
-            bool linkTempSTChain = true,
-            const NonProvableKeySet &nonProvableKeySet = NonProvableKeySet{});
-
-  // Make the adapter non-copyable.
-  DBAdapter(const DBAdapter &) = delete;
-  DBAdapter &operator=(const DBAdapter &) = delete;
+  // The constructor will try to link the blockchain with any blocks in the temporary state transfer chain. This is done
+  // so that the DBAdapter will operate correctly in case a crash or an abnormal shutdown has occurred prior to startup
+  // (construction). Only a single DBAdapter instance should operate on a database and access to all methods
+  // should be either done from a single thread or serialized via a mutex or another mechanism. The constructor throws
+  // if an error occurs.
+  // Note: The passed DB client must be initialized beforehand.
+  DBAdapter(const std::shared_ptr<concord::storage::IDBClient> &db);
 
   // Adds a block to the end of the blockchain from a set of key/value pairs and a set of keys to delete. If a key is
   // present in both 'updates' and 'deletes' parameters, it will be present in the block with the value passed in
@@ -183,11 +169,9 @@ class DBAdapter : public IDbAdapter {
 
   block::detail::Node getBlockNode(BlockId blockId) const;
 
-  KeysVector staleIndexNonProvableKeysForBlock(BlockId blockId) const;
+  KeysVector staleIndexKeysForVersion(const sparse_merkle::Version &version) const;
 
-  KeysVector staleIndexProvableKeysForVersion(const sparse_merkle::Version &version) const;
-
-  KeysVector internalProvableKeysForVersion(const sparse_merkle::Version &version) const;
+  KeysVector internalKeysForVersion(const sparse_merkle::Version &version) const;
 
   KeysVector lastReachableBlockKeyDeletes(BlockId blockId) const;
 
@@ -196,18 +180,7 @@ class DBAdapter : public IDbAdapter {
   std::optional<std::pair<Key, Value>> getLeafKeyValAtMostVersion(const Key &key,
                                                                   const sparse_merkle::Version &version) const;
 
-  void deleteGenesisBlock();
-
   void deleteKeysForBlock(const KeysVector &keys, BlockId blockId) const;
-
-  BlockId loadGenesisBlockId() const;
-
-  BlockId loadLastReachableBlockId() const;
-
-  // Return std::nullopt if no temporary ST blocks are present.
-  std::optional<BlockId> loadLatestTempSTBlockId() const;
-
-  std::optional<std::pair<Value, BlockId>> getValueForNonProvableKey(const Key &key, const BlockId &blockVersion) const;
 
   class Reader : public sparse_merkle::IDBReader {
    public:
@@ -227,13 +200,7 @@ class DBAdapter : public IDbAdapter {
 
   logging::Logger logger_;
   std::shared_ptr<storage::IDBClient> db_;
-  BlockId genesisBlockId_{0};
-  BlockId lastReachableBlockId_{0};
-  // The latest ST temporary block ID. Not set if no ST temporary blocks are present in the system.
-  std::optional<BlockId> latestSTTempBlockId_;
   sparse_merkle::Tree smTree_;
-  std::unique_ptr<concordMetrics::ISummary> commitSizeSummary_;
-  const NonProvableKeySet nonProvableKeySet_;
 };
 
 namespace detail {

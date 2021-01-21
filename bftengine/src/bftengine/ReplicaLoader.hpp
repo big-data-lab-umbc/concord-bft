@@ -34,8 +34,7 @@ class CheckpointMsg;
 
 // This struct represents the BFT data loaded from persistent storage
 struct LoadedReplicaData {
-  LoadedReplicaData() : repConfig(ReplicaConfig::instance()) {}
-  ReplicaConfig &repConfig;
+  ReplicaConfig repConfig;
   SigManager *sigManager = nullptr;
   ReplicasInfo *repsInfo = nullptr;
   ViewsManager *viewsManager = nullptr;

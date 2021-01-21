@@ -12,23 +12,13 @@
 #pragma once
 
 #include "MessageBase.hpp"
-#include "OpenTracing.hpp"
-
-#include <iostream>
-#include <sstream>
-#include <bitset>
 
 namespace bftEngine {
 namespace impl {
 
 class ReqMissingDataMsg : public MessageBase {
  public:
-  ReqMissingDataMsg(ReplicaId senderId,
-                    ViewNum v,
-                    SeqNum s,
-                    const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  BFTENGINE_GEN_CONSTRUCT_FROM_BASE_MESSAGE(ReqMissingDataMsg)
+  ReqMissingDataMsg(ReplicaId senderId, ViewNum v, SeqNum s, const std::string& spanContext = "");
 
   ViewNum viewNumber() const { return b()->viewNum; }
 
@@ -44,11 +34,6 @@ class ReqMissingDataMsg : public MessageBase {
   bool getSlowPathHasStarted() const { return b()->flags.bits.slowPathHasStarted != 0; }
 
   uint16_t getFlags() const { return b()->flags.flags; }
-  std::string getFlagsAsBits() const {
-    std::stringstream sst;
-    sst << std::bitset<9>(b()->flags.flags);
-    return sst.str();
-  };
 
   void resetFlags();
 

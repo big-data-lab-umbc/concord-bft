@@ -27,10 +27,8 @@ class PartialCommitProofMsg : public MessageBase {
                         SeqNum s,
                         CommitPath commitPath,
                         Digest& digest,
-                        std::shared_ptr<IThresholdSigner> thresholdSigner,
-                        const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  BFTENGINE_GEN_CONSTRUCT_FROM_BASE_MESSAGE(PartialCommitProofMsg)
+                        IThresholdSigner* thresholdSigner,
+                        const std::string& spanContext = "");
 
   ViewNum viewNumber() const { return b()->viewNum; }
 

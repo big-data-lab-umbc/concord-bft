@@ -26,12 +26,12 @@ using namespace bftEngine;
 using namespace bft::communication;
 using namespace std;
 
-#define test_assert(statement, message)                                                                          \
-  {                                                                                                              \
-    if (!(statement)) {                                                                                          \
-      LOG_FATAL(clientLogger, "assert fail with message: " << message); /* NOLINT(bugprone-macro-parentheses) */ \
-      ConcordAssert(false);                                                                                      \
-    }                                                                                                            \
+#define test_assert(statement, message)                                 \
+  {                                                                     \
+    if (!(statement)) {                                                 \
+      LOG_FATAL(clientLogger, "assert fail with message: " << message); \
+      ConcordAssert(false);                                             \
+    }                                                                   \
   }
 
 class SimpleTestClient {
@@ -52,7 +52,7 @@ class SimpleTestClient {
 
     // Concord clients must tag each request with a unique sequence number. This
     // generator handles that for us.
-    std::unique_ptr<SeqNumberGeneratorForClientRequests> pSeqGen =
+    SeqNumberGeneratorForClientRequests* pSeqGen =
         SeqNumberGeneratorForClientRequests::createSeqNumberGeneratorForClientRequests();
 
     TestCommConfig testCommConfig(clientLogger);
@@ -217,6 +217,7 @@ class SimpleTestClient {
         "clientMetrics::retransmissionTimer " << aggregator->GetGauge(metric_comp_name, "retransmissionTimer").Get());
     test_assert(aggregator->GetCounter(metric_comp_name, "retransmissions").Get() >= 0, "retransmissions <" << 0);
     test_assert(aggregator->GetGauge(metric_comp_name, "retransmissionTimer").Get() >= 0, "retransmissionTimer <" << 0);
+    delete pSeqGen;
     delete client;
     delete comm;
 

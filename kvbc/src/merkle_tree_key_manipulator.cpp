@@ -38,10 +38,6 @@ using sparse_merkle::InternalNodeKey;
 using sparse_merkle::LeafKey;
 using sparse_merkle::Version;
 
-Key DBKeyManipulator::genNonProvableDbKey(BlockId block_id, const Key &key) {
-  return serialize(EKeySubtype::NonProvable) + key.toString() + serializeImp(block_id);
-}
-
 Key DBKeyManipulator::genBlockDbKey(BlockId version) { return serialize(EDBKeyType::Block, version); }
 
 Key DBKeyManipulator::genDataDbKey(const LeafKey &key) { return serialize(EKeySubtype::Leaf, key); }
@@ -54,37 +50,18 @@ Key DBKeyManipulator::genDataDbKey(const Key &key, const Version &version) {
 Key DBKeyManipulator::genInternalDbKey(const InternalNodeKey &key) { return serialize(EKeySubtype::Internal, key); }
 
 Key DBKeyManipulator::genStaleDbKey(const InternalNodeKey &key, const Version &staleSinceVersion) {
-  return serialize(EKeySubtype::ProvableStale, staleSinceVersion.value(), EKeySubtype::Internal, key);
+  return serialize(EKeySubtype::Stale, staleSinceVersion.value(), EKeySubtype::Internal, key);
 }
 
 Key DBKeyManipulator::genStaleDbKey(const LeafKey &key, const Version &staleSinceVersion) {
-  return serialize(EKeySubtype::ProvableStale, staleSinceVersion.value(), EKeySubtype::Leaf, key);
+  return serialize(EKeySubtype::Stale, staleSinceVersion.value(), EKeySubtype::Leaf, key);
 }
 
 Key DBKeyManipulator::genStaleDbKey(const Version &staleSinceVersion) {
-  return serialize(EKeySubtype::ProvableStale, staleSinceVersion.value());
-}
-
-Key DBKeyManipulator::genNonProvableStaleDbKey(const Key &key, BlockId staleSinceBlock) {
-  return serialize(EKeySubtype::NonProvableStale, staleSinceBlock) + key.toString();
+  return serialize(EKeySubtype::Stale, staleSinceVersion.value());
 }
 
 Key DBKeyManipulator::generateSTTempBlockKey(BlockId blockId) { return serialize(EBFTSubtype::STTempBlock, blockId); }
-
-BlockId DBKeyManipulator::extractBlockIdFromNonProvableKey(const Key &key) {
-  ConcordAssert(key.length() >= sizeof(EDBKeyType::Key) + sizeof(EKeySubtype::NonProvable) + sizeof(BlockId));
-  ConcordAssert(DBKeyManipulator::getDBKeyType(key) == EDBKeyType::Key);
-  ConcordAssert(DBKeyManipulator::getKeySubtype(key) == EKeySubtype::NonProvable);
-  return fromBigEndianBuffer<BlockId>(key.data() + key.length() - sizeof(BlockId));
-}
-
-Key DBKeyManipulator::extractKeyFromNonProvableKey(const Key &key) {
-  constexpr auto keyOffset = sizeof(EDBKeyType) + sizeof(EKeySubtype);
-  ConcordAssert(key.length() >= keyOffset + sizeof(BlockId));
-  ConcordAssert(DBKeyManipulator::getDBKeyType(key) == EDBKeyType::Key);
-  ConcordAssert(DBKeyManipulator::getKeySubtype(key) == EKeySubtype::NonProvable);
-  return Key{key, keyOffset, key.length() - keyOffset - sizeof(BlockId)};
-}
 
 BlockId DBKeyManipulator::extractBlockIdFromKey(const Key &key) {
   ConcordAssert(key.length() > sizeof(BlockId));
@@ -106,35 +83,19 @@ Hash DBKeyManipulator::extractHashFromLeafKey(const Key &key) {
   return Hash{reinterpret_cast<const uint8_t *>(key.data() + keyTypeOffset)};
 }
 
-Version DBKeyManipulator::extractVersionFromProvableStaleKey(const Key &key) {
+Version DBKeyManipulator::extractVersionFromStaleKey(const Key &key) {
   constexpr auto keyTypeOffset = sizeof(EDBKeyType) + sizeof(EKeySubtype);
   ConcordAssert(key.length() >= keyTypeOffset + Version::SIZE_IN_BYTES);
   ConcordAssert(DBKeyManipulator::getDBKeyType(key) == EDBKeyType::Key);
-  ConcordAssert(DBKeyManipulator::getKeySubtype(key) == EKeySubtype::ProvableStale);
+  ConcordAssert(DBKeyManipulator::getKeySubtype(key) == EKeySubtype::Stale);
   return fromBigEndianBuffer<Version::Type>(key.data() + keyTypeOffset);
 }
 
-BlockId DBKeyManipulator::extractBlockIdFromNonProvableStaleKey(const Key &key) {
-  constexpr auto keyTypeOffset = sizeof(EDBKeyType) + sizeof(EKeySubtype);
-  ConcordAssert(key.length() >= keyTypeOffset + sizeof(BlockId));
-  ConcordAssert(DBKeyManipulator::getDBKeyType(key) == EDBKeyType::Key);
-  ConcordAssert(DBKeyManipulator::getKeySubtype(key) == EKeySubtype::NonProvableStale);
-  return fromBigEndianBuffer<BlockId>(key.data() + keyTypeOffset);
-}
-
-Key DBKeyManipulator::extractKeyFromProvableStaleKey(const Key &key) {
+Key DBKeyManipulator::extractKeyFromStaleKey(const Key &key) {
   constexpr auto keyOffset = sizeof(EDBKeyType) + sizeof(EKeySubtype) + Version::SIZE_IN_BYTES;
   ConcordAssert(key.length() > keyOffset);
   ConcordAssert(DBKeyManipulator::getDBKeyType(key) == EDBKeyType::Key);
-  ConcordAssert(DBKeyManipulator::getKeySubtype(key) == EKeySubtype::ProvableStale);
-  return Key{key, keyOffset, key.length() - keyOffset};
-}
-
-Key DBKeyManipulator::extractKeyFromNonProvableStaleKey(const Key &key) {
-  constexpr auto keyOffset = sizeof(EDBKeyType) + sizeof(EKeySubtype) + sizeof(BlockId);
-  ConcordAssert(key.length() > keyOffset);
-  ConcordAssert(DBKeyManipulator::getDBKeyType(key) == EDBKeyType::Key);
-  ConcordAssert(DBKeyManipulator::getKeySubtype(key) == EKeySubtype::NonProvableStale);
+  ConcordAssert(DBKeyManipulator::getKeySubtype(key) == EKeySubtype::Stale);
   return Key{key, keyOffset, key.length() - keyOffset};
 }
 
@@ -169,14 +130,10 @@ EKeySubtype DBKeyManipulator::getKeySubtype(const Sliver &s) {
   switch (s[1]) {
     case toChar(EKeySubtype::Internal):
       return EKeySubtype::Internal;
-    case toChar(EKeySubtype::ProvableStale):
-      return EKeySubtype::ProvableStale;
-    case toChar(EKeySubtype::NonProvableStale):
-      return EKeySubtype::NonProvableStale;
+    case toChar(EKeySubtype::Stale):
+      return EKeySubtype::Stale;
     case toChar(EKeySubtype::Leaf):
       return EKeySubtype::Leaf;
-    case toChar(EKeySubtype::NonProvable):
-      return EKeySubtype::NonProvable;
   }
   ConcordAssert(false);
 
@@ -195,6 +152,8 @@ EBFTSubtype DBKeyManipulator::getBftSubtype(const Sliver &s) {
       return EBFTSubtype::ST;
     case toChar(EBFTSubtype::STPendingPage):
       return EBFTSubtype::STPendingPage;
+    case toChar(EBFTSubtype::STReservedPageStatic):
+      return EBFTSubtype::STReservedPageStatic;
     case toChar(EBFTSubtype::STReservedPageDynamic):
       return EBFTSubtype::STReservedPageDynamic;
     case toChar(EBFTSubtype::STCheckpointDescriptor):

@@ -22,10 +22,16 @@ namespace bftEngine {
 namespace impl {
 
 const string METADATA_PARAMS_VERSION = "1.1";
+const uint16_t MAX_METADATA_PARAMS_NUM = 10000;
 
 PersistentStorageImp::PersistentStorageImp(uint16_t fVal, uint16_t cVal)
-    : fVal_(fVal), cVal_(cVal), version_(METADATA_PARAMS_VERSION) {
+    : defaultReplicaConfig_(nullptr),
+      fVal_(fVal),
+      cVal_(cVal),
+      numOfReplicas_(3 * fVal + 2 * cVal + 1),
+      version_(METADATA_PARAMS_VERSION) {
   DescriptorOfLastNewView::setViewChangeMsgsNum(fVal, cVal);
+  configSerializer_.reset(new ReplicaConfigSerializer(nullptr));  // ReplicaConfig placeholder
 }
 
 void PersistentStorageImp::retrieveWindowsMetadata() {
@@ -33,18 +39,14 @@ void PersistentStorageImp::retrieveWindowsMetadata() {
   checkWindowBeginning_ = readBeginningOfActiveWindow(BEGINNING_OF_CHECK_WINDOW);
 }
 
-bool PersistentStorageImp::init(unique_ptr<MetadataStorage> metadataStorage, bool &erasedMetadata) {
+bool PersistentStorageImp::init(unique_ptr<MetadataStorage> metadataStorage) {
   metadataStorage_ = move(metadataStorage);
-  erasedMetadata = false;
-  if (getEraseMetadataStorageFlag()) {
-    eraseMetadata();
-    erasedMetadata = true;
-  }
   try {
     if (!getStoredVersion().empty()) {
       LOG_INFO(GL, "PersistentStorageImp::init version=" << version_.c_str());
       retrieveWindowsMetadata();
       // Retrieve metadata parameters stored in the memory
+      getReplicaConfig();
       getDescriptorOfLastExecution();
       return false;
     }
@@ -55,10 +57,6 @@ bool PersistentStorageImp::init(unique_ptr<MetadataStorage> metadataStorage, boo
   return true;
 }
 
-bool PersistentStorageImp::init(std::unique_ptr<MetadataStorage> metadataStorage) {
-  bool dummy;
-  return init(std::move(metadataStorage), dummy);
-}
 void PersistentStorageImp::setDefaultsInMetadataStorage() {
   LOG_INFO(GL, "");
   beginWriteTran();
@@ -75,6 +73,7 @@ void PersistentStorageImp::setDefaultsInMetadataStorage() {
   initDescriptorOfLastExitFromView();
   initDescriptorOfLastNewView();
   initDescriptorOfLastExecution();
+
   endWriteTran();
 }
 
@@ -94,9 +93,11 @@ ObjectDescUniquePtr PersistentStorageImp::getDefaultMetadataObjectDescriptors(ui
   metadataObjectsArray.get()[LOWER_BOUND_OF_SEQ_NUM].maxSize = sizeof(strictLowerBoundOfSeqNums_);
   metadataObjectsArray.get()[LAST_VIEW_TRANSFERRED_SEQ_NUM].maxSize = sizeof(lastViewTransferredSeqNum_);
   metadataObjectsArray.get()[LAST_STABLE_SEQ_NUM].maxSize = sizeof(lastStableSeqNum_);
+
+  metadataObjectsArray.get()[REPLICA_CONFIG].maxSize = ReplicaConfigSerializer::maxSize(numOfReplicas_);
+
   metadataObjectsArray.get()[BEGINNING_OF_SEQ_NUM_WINDOW].maxSize = sizeof(SeqNum);
   metadataObjectsArray.get()[BEGINNING_OF_CHECK_WINDOW].maxSize = sizeof(SeqNum);
-  metadataObjectsArray.get()[ERASE_METADATA_ON_STARTUP].maxSize = sizeof(bool);
 
   for (auto i = 0; i < kWorkWindowSize; ++i) {
     metadataObjectsArray.get()[LAST_EXIT_FROM_VIEW_DESC + 1 + i].maxSize =
@@ -142,6 +143,14 @@ uint8_t PersistentStorageImp::endWriteTran() {
 bool PersistentStorageImp::isInWriteTran() const { return (numOfNestedTransactions_ != 0); }
 
 /***** Setters *****/
+
+void PersistentStorageImp::setReplicaConfig(const ReplicaConfig &config) {
+  ConcordAssert(isInWriteTran());
+  std::ostringstream oss;
+  configSerializer_->setConfig(config);
+  configSerializer_->serialize(oss);
+  metadataStorage_->writeInBatch(REPLICA_CONFIG, (char *)oss.rdbuf()->str().c_str(), oss.tellp());
+}
 
 void PersistentStorageImp::setVersion() const {
   ConcordAssert(isInWriteTran());
@@ -507,6 +516,18 @@ string PersistentStorageImp::getStoredVersion() {
   return version_;
 }
 
+ReplicaConfig PersistentStorageImp::getReplicaConfig() {
+  uint32_t outActualObjectSize = 0;
+  UniquePtrToChar outBuf(new char[ReplicaConfigSerializer::maxSize(numOfReplicas_)]);
+  metadataStorage_->read(
+      REPLICA_CONFIG, ReplicaConfigSerializer::maxSize(numOfReplicas_), outBuf.get(), outActualObjectSize);
+  std::istringstream iss(std::string(outBuf.get(), outActualObjectSize));
+  ReplicaConfigSerializer *rc = nullptr;
+  ReplicaConfigSerializer::deserialize(iss, rc);
+  configSerializer_.reset(rc);
+  return *configSerializer_->getConfig();
+}
+
 SeqNum PersistentStorageImp::getLastExecutedSeqNum() {
   ConcordAssert(getIsAllowed());
   lastExecutedSeqNum_ = getSeqNum(LAST_EXEC_SEQ_NUM, sizeof(lastExecutedSeqNum_));
@@ -536,6 +557,8 @@ ViewNum PersistentStorageImp::getLastViewThatTransferredSeqNumbersFullyExecuted(
   lastViewTransferredSeqNum_ = getSeqNum(LAST_VIEW_TRANSFERRED_SEQ_NUM, sizeof(lastViewTransferredSeqNum_));
   return lastViewTransferredSeqNum_;
 }
+
+bool PersistentStorageImp::hasReplicaConfig() const { return (!(*configSerializer_ == defaultReplicaConfig_)); }
 
 /***** Descriptors handling *****/
 
@@ -845,6 +868,7 @@ void PersistentStorageImp::verifySetDescriptorOfLastNewView(const DescriptorOfLa
   ConcordAssert(desc.view >= 1);
   ConcordAssert(hasDescriptorOfLastExitFromView());
   ConcordAssert(desc.newViewMsg->newView() == desc.view);
+  ConcordAssert(hasReplicaConfig());
   const size_t numOfVCMsgs = 2 * fVal_ + 2 * cVal_ + 1;
   ConcordAssert(desc.viewChangeMsgs.size() == numOfVCMsgs);
 }
@@ -867,8 +891,8 @@ SeqNum PersistentStorageImp::getSeqNum(ConstMetadataParameterIds id, uint32_t si
 }
 
 bool PersistentStorageImp::setIsAllowed() const {
-  LOG_DEBUG(GL, "isInWriteTran=" << isInWriteTran());
-  return isInWriteTran();
+  LOG_DEBUG(GL, "isInWriteTran=" << isInWriteTran() << ", hasReplicaConfig=" << hasReplicaConfig());
+  return (isInWriteTran() && hasReplicaConfig());
 }
 
 bool PersistentStorageImp::getIsAllowed() const {
@@ -880,20 +904,6 @@ bool PersistentStorageImp::nonExecSetIsAllowed() {
   return setIsAllowed() &&
          (!hasDescriptorOfLastExecution() || descriptorOfLastExecution_.executedSeqNum <= lastExecutedSeqNum_);
 }
-void PersistentStorageImp::setEraseMetadataStorageFlag() {
-  bool eraseMtOnStartUp = true;
-  metadataStorage_->atomicWrite(ERASE_METADATA_ON_STARTUP, (char *)&eraseMtOnStartUp, sizeof(eraseMtOnStartUp));
-}
-
-bool PersistentStorageImp::getEraseMetadataStorageFlag() {
-  uint32_t actualObjectSize = 0;
-  bool eraseMetaDataOnStartup = false;
-  metadataStorage_->read(
-      ERASE_METADATA_ON_STARTUP, sizeof(eraseMetaDataOnStartup), (char *)&eraseMetaDataOnStartup, actualObjectSize);
-  if (actualObjectSize == 0) return false;
-  return eraseMetaDataOnStartup;
-}
-void PersistentStorageImp::eraseMetadata() { metadataStorage_->eraseData(); }
 
 }  // namespace impl
 }  // namespace bftEngine

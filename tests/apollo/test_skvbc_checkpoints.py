@@ -56,11 +56,15 @@ class SkvbcCheckpointTest(unittest.TestCase):
         bft_network.start_all_replicas()
         skvbc = kvbc.SimpleKVBCProtocol(bft_network)
 
+        checkpoint_before = await bft_network.wait_for_checkpoint(replica_id=0)
         await skvbc.fill_and_wait_for_checkpoint(
             initial_nodes=bft_network.all_replicas(),
             num_of_checkpoints_to_add=1,
             verify_checkpoint_persistency=False
         )
+        checkpoint_after = await bft_network.wait_for_checkpoint(replica_id=0)
+
+        self.assertEqual(checkpoint_after, 1 + checkpoint_before)
 
     @with_trio
     @with_bft_network(start_replica_cmd)
@@ -118,6 +122,7 @@ class SkvbcCheckpointTest(unittest.TestCase):
             crashed_replicas,
             expected_checkpoint_num=lambda ecn: ecn == checkpoint_after_primary)
 
+    @unittest.skip("Unstable due to BC-3451")
     @with_trio
     @with_bft_network(start_replica_cmd)
     async def test_checkpoint_propagation_after_crashed_replicas_comeback_after_vc(self, bft_network):
@@ -131,8 +136,9 @@ class SkvbcCheckpointTest(unittest.TestCase):
         4) Make sure checkpoint is created
         5) Crash the initial primary & send a batch of write requests
         6) Verify view change has occurred
-        7) Bring the f crashed replicas up
-        8) Verify checkpoint propagation to all the nodes
+        7) Verify checkpoint propagation to current primary in the new view
+        8) Bring the f replicas up
+        9) Verify checkpoint propagation to a stale node of the f replicas brought up
         """
         bft_network.start_all_replicas()
         skvbc = kvbc.SimpleKVBCProtocol(bft_network)
@@ -150,7 +156,7 @@ class SkvbcCheckpointTest(unittest.TestCase):
 
         checkpoint_init_primary_before = await bft_network.wait_for_checkpoint(replica_id=initial_primary)
 
-        # crash f-1 replicas, crash initial_primary after checkpoint creation to trigger view change
+        # crashing f-1 replicas, initial_primary is crashed after checkpoint creation to trigger vc
         crashed_replicas = await self._crash_replicas(
             bft_network=bft_network,
             nb_crashing=f - 1,
@@ -175,24 +181,32 @@ class SkvbcCheckpointTest(unittest.TestCase):
         await bft_network.wait_for_view(
             replica_id=initial_primary,
             expected=lambda v: v == initial_primary,
-            err_msg="Make sure we are in the initial view before crashing the primary."
+            err_msg="Make sure we are in the initial view "
+                    "before crashing the primary."
         )
 
-        # trigger a view change by crashing the initial primary and sending a batch of write requests
+        # trigger a view change by crashing the initial primary
         bft_network.stop_replica(initial_primary)
-        await self._send_random_writes(skvbc)
-
         crashed_replicas.add(initial_primary)
 
-        # wait for view change
-        for replica in bft_network.all_replicas(without=crashed_replicas):
-            await bft_network.wait_for_view(
-                replica_id=replica,
-                expected=lambda v: v == expected_next_primary,
-                err_msg="Make sure view change has been triggered."
-            )
+        # send a batch of write requests
+        await self._send_random_writes(skvbc)
 
-        # start crashed replicas including the initial primary
+        # wait for view change
+        await bft_network.wait_for_view(
+            replica_id=random.choice(bft_network.all_replicas(without=crashed_replicas)),
+            expected=lambda v: v == expected_next_primary,
+            err_msg="Make sure view change has been triggered."
+        )
+
+        current_primary = initial_primary + 1
+        self.assertEqual(current_primary, expected_next_primary)
+
+        checkpoint_current_primary = await bft_network.wait_for_checkpoint(replica_id=current_primary)
+
+        # verify checkpoint propagation to current primary in the new view
+        self.assertEqual(checkpoint_current_primary, checkpoint_init_primary_after)
+
         bft_network.start_replicas(crashed_replicas)
 
         # verify view stabilization among all the stale nodes after they come back up
@@ -203,13 +217,11 @@ class SkvbcCheckpointTest(unittest.TestCase):
                 err_msg=f"Make sure view change has been triggered for stale replica: {crashed_replica}."
             )
 
-        # verify checkpoint propagation to all the nodes after they come back up
+        # verify checkpoint propagation to all the stale nodes after they come back up
         await bft_network.wait_for_replicas_to_checkpoint(
-            bft_network.all_replicas(),
-            expected_checkpoint_num=lambda ecn: ecn >= checkpoint_init_primary_after)
+            crashed_replicas,
+            expected_checkpoint_num=lambda ecn: ecn == checkpoint_current_primary)
 
-    from os import environ
-    @unittest.skipIf(environ.get('BUILD_COMM_TCP_TLS', "").lower() == "true", "Unstable on CI (TCP/TLS only)")
     @with_trio
     @with_bft_network(start_replica_cmd)
     async def test_checkpoint_propagation_after_f_non_primaries_isolated(self, bft_network):
@@ -252,8 +264,6 @@ class SkvbcCheckpointTest(unittest.TestCase):
             isolated_replicas,
             expected_checkpoint_num=lambda ecn: ecn == checkpoint_before + 1)
 
-    from os import environ
-    @unittest.skipIf(environ.get('BUILD_COMM_TCP_TLS', "").lower() == "true", "Unstable on CI (TCP/TLS only)")
     @with_trio
     @with_bft_network(start_replica_cmd)
     async def test_checkpoint_propagation_after_primary_isolation(self, bft_network):
@@ -267,8 +277,8 @@ class SkvbcCheckpointTest(unittest.TestCase):
         5) Make sure checkpoint is propagated to all the nodes except the isolated primary
            in the new view
         """
-        bft_network.start_all_replicas()
         with net.PrimaryIsolatingAdversary(bft_network) as adversary:
+            bft_network.start_all_replicas()
             skvbc = kvbc.SimpleKVBCProtocol(bft_network)
 
             n = bft_network.config.n
@@ -309,8 +319,6 @@ class SkvbcCheckpointTest(unittest.TestCase):
                 verify_checkpoint_persistency=False
             )
 
-    from os import environ
-    @unittest.skipIf(environ.get('BUILD_COMM_TCP_TLS', "").lower() == "true", "Unstable on CI (TCP/TLS only)")
     @with_trio
     @with_bft_network(start_replica_cmd)
     async def test_checkpoint_propagation_after_f_nodes_including_primary_isolated(self, bft_network):

@@ -16,14 +16,11 @@
 namespace bftEngine {
 namespace impl {
 
-StartSlowCommitMsg::StartSlowCommitMsg(ReplicaId senderId,
-                                       ViewNum v,
-                                       SeqNum s,
-                                       const concordUtils::SpanContext& spanContext)
-    : MessageBase(senderId, MsgCode::StartSlowCommit, spanContext.data().size(), sizeof(Header)) {
+StartSlowCommitMsg::StartSlowCommitMsg(ReplicaId senderId, ViewNum v, SeqNum s, const std::string& spanContext)
+    : MessageBase(senderId, MsgCode::StartSlowCommit, spanContext.size(), sizeof(Header)) {
   b()->viewNum = v;
   b()->seqNum = s;
-  std::memcpy(body() + sizeof(Header), spanContext.data().data(), spanContext.data().size());
+  std::memcpy(body() + sizeof(Header), spanContext.data(), spanContext.size());
 }
 
 void StartSlowCommitMsg::validate(const ReplicasInfo& repInfo) const {

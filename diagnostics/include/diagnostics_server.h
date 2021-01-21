@@ -16,6 +16,7 @@
 #pragma once
 
 #include <atomic>
+#include <cassert>
 #include <chrono>
 #include <cstring>
 #include <future>
@@ -27,6 +28,7 @@
 #include <thread>
 #include <unistd.h>
 
+#include "assertUtils.hpp"
 #include "Logger.hpp"
 #include "errnoString.hpp"
 #include "protocol.h"
@@ -35,6 +37,7 @@ using concordUtils::errnoString;
 
 namespace concord::diagnostics {
 
+static constexpr uint16_t PORT = 6888;
 static constexpr int BACKLOG = 5;
 static constexpr size_t MAX_INPUT_SIZE = 1024;
 
@@ -42,7 +45,7 @@ static logging::Logger logger = logging::getLogger("concord.diagnostics");
 
 // Returns a successfully read line as a string.
 // Throws a std::runtime_error on error.
-inline std::string readline(int sock) {
+std::string readline(int sock) {
   std::array<char, MAX_INPUT_SIZE> buf;
   buf.fill(0);
   int count = 0;
@@ -69,7 +72,7 @@ inline std::string readline(int sock) {
       throw std::runtime_error("Request exceeded max size: " + std::to_string(MAX_INPUT_SIZE));
     }
 
-    rv = read(sock, buf.data() + count, buf.size() - count);
+    rv = read(sock, &buf + count, buf.size() - count);
     if (rv <= 0) {
       throw std::runtime_error("read failed: " + errnoString(rv));
     }
@@ -88,7 +91,7 @@ inline std::string readline(int sock) {
   }
 }
 
-inline void handleRequest(Registrar& registrar, int sock) {
+void handleRequest(const Registrar& registrar, int sock) {
   try {
     std::stringstream ss(readline(sock));
     std::vector<std::string> tokens;
@@ -118,14 +121,10 @@ inline void handleRequest(Registrar& registrar, int sock) {
 // use case.
 class Server {
  public:
-  void start(Registrar& registrar, in_addr_t host, uint16_t port) {
+  void start(const Registrar& registrar) {
     shutdown_.store(false);
-    listen_thread_ = std::thread([this, &registrar, host, port]() {
-      if (listen(host, port) == -1) {
-        LOG_ERROR(logger, "Failed to listen to incoming requests");
-        shutdown_.store(true);
-        return;
-      }
+    listen_thread_ = std::thread([this, &registrar]() {
+      listen();
 
       while (!shutdown_.load()) {
         fd_set read_fds;
@@ -136,16 +135,8 @@ class Server {
         tv.tv_usec = 0;
         auto rv = select(listen_sock_ + 1, &read_fds, NULL, NULL, &tv);
         if (rv == 0) continue;  // timeout
-        if (rv < 0 && errno == EINTR) {
-          LOG_WARN(logger, "While waiting for a client requests, an interruption has occurred");
-          continue;
-        }
-        if (rv < 0) {
-          LOG_ERROR(logger,
-                    "Error while waiting for new client request, shutting down the server " << errnoString(errno));
-          shutdown_.store(true);
-          return;
-        }
+        if (rv < 0 && errno == EINTR) continue;
+        ConcordAssert(rv > 0);
         int sock = accept(listen_sock_, NULL, NULL);
         // We must bind the result future or else this call blocks.
         auto _ = std::async(std::launch::async, [&]() { handleRequest(registrar, sock); });
@@ -160,30 +151,27 @@ class Server {
   };
 
  private:
-  int listen(in_addr_t host, uint16_t port) {
+  void listen() {
     listen_sock_ = socket(AF_INET, SOCK_STREAM, 0);
-    if (listen_sock_ < 0) {
-      LOG_ERROR(logger, "couldn't retrieve a socket FD, shutting down the server");
-      return -1;
-    }
+    ConcordAssert(listen_sock_ >= 0);
     bzero(&servaddr_, sizeof(servaddr_));
     servaddr_.sin_family = AF_INET;
-    servaddr_.sin_addr.s_addr = htonl(host);
-    servaddr_.sin_port = htons(port);
+    // LOCALHOST ONLY, FOR SECURITY PURPOSES. DO NOT CHANGE THIS!!!
+    servaddr_.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    servaddr_.sin_port = htons(PORT);
     int enable = 1;
     if (setsockopt(listen_sock_, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable))) {
-      LOG_ERROR(logger, "Failed to set listen socket options: " << errnoString(errno));
-      return -1;
+      LOG_FATAL(logger, "Failed to set listen socket options: " << errnoString(errno));
+      std::exit(-1);
     }
     if (bind(listen_sock_, (sockaddr*)&servaddr_, sizeof(servaddr_))) {
-      LOG_ERROR(logger, "Failed to bind listen socket: " << errnoString(errno));
-      return -1;
+      LOG_FATAL(logger, "Failed to bind listen socket: " << errnoString(errno));
+      std::exit(-1);
     }
     if (::listen(listen_sock_, BACKLOG)) {
-      LOG_ERROR(logger, "Failed to listen for connections: " << errnoString(errno));
-      return -1;
+      LOG_FATAL(logger, "Failed to listen for connections: " << errnoString(errno));
+      std::exit(-1);
     }
-    return 0;
   }
 
   int listen_sock_;

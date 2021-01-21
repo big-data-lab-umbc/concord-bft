@@ -24,9 +24,7 @@ class FullCommitProofMsg : public MessageBase {
                      SeqNum s,
                      const char* commitProofSig,
                      uint16_t commitProofSigLength,
-                     const concordUtils::SpanContext& spanContext = concordUtils::SpanContext{});
-
-  BFTENGINE_GEN_CONSTRUCT_FROM_BASE_MESSAGE(FullCommitProofMsg)
+                     const std::string& spanContext = "");
 
   ViewNum viewNumber() const { return b()->viewNum; }
 

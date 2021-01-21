@@ -20,8 +20,6 @@
 
 class IThresholdVerifier;
 class IThresholdSigner;
-class IShareSecretKey;
-class IShareVerificationKey;
 
 class IThresholdFactory {
  public:
@@ -47,9 +45,4 @@ class IThresholdFactory {
    */
   virtual std::tuple<std::vector<IThresholdSigner*>, IThresholdVerifier*> newRandomSigners(
       NumSharesType reqSigners, NumSharesType numSigners) const = 0;
-
-  /**
-   * Generates a single key pair
-   */
-  virtual std::pair<std::unique_ptr<IShareSecretKey>, std::unique_ptr<IShareVerificationKey>> newKeyPair() const = 0;
 };

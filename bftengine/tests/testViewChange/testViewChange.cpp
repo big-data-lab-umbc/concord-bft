@@ -34,11 +34,8 @@ using namespace std;
 using namespace bftEngine;
 
 namespace {
-// Since ReplicaConfig is a singleton and the test requires several instances,
-// we need to define a replica config for tests.
-class TestReplicaConfig : public bftEngine::ReplicaConfig {};
 
-TestReplicaConfig replicaConfig[4] = {};
+ReplicaConfig replicaConfig[4] = {};
 static const int N = 4;
 static const int F = 1;
 static const int C = 0;
@@ -91,6 +88,7 @@ class DummyThresholdAccumulator : public IThresholdAccumulator {
   virtual bool hasShareVerificationEnabled() const override { return true; }
   virtual int getNumValidShares() const override { return 0; }
   virtual void getFullSignedData(char* outThreshSig, int threshSigLen) override {}
+  virtual IThresholdAccumulator* clone() override { return this; }
 };
 
 class DummySigner : public IThresholdSigner {
@@ -104,6 +102,9 @@ class DummySigner : public IThresholdSigner {
   virtual const IShareSecretKey& getShareSecretKey() const override { return dummyShareSecretKey_; }
   virtual const IShareVerificationKey& getShareVerificationKey() const override { return dummyShareVerificationKey_; }
 
+  virtual const std::string getVersion() const override { return std::string("123"); }
+  virtual void serializeDataMembers(std::ostream&) const override {}
+  virtual void deserializeDataMembers(std::istream&) override {}
 } dummySigner_;
 
 class DummyVerifier : public IThresholdVerifier {
@@ -111,9 +112,11 @@ class DummyVerifier : public IThresholdVerifier {
   mutable DummyThresholdAccumulator dummyThresholdAccumulator_;
 
  public:
-  IThresholdAccumulator* newAccumulator(bool withShareVerification) const override {
-    return new DummyThresholdAccumulator;
+  virtual IThresholdAccumulator* newAccumulator(bool withShareVerification) const override {
+    return &dummyThresholdAccumulator_;
   }
+  virtual void release(IThresholdAccumulator* acc) override {}
+
   virtual bool verify(const char* msg, int msgLen, const char* sig, int sigLen) const override { return true; }
   virtual int requiredLengthForSignedData() const override { return 3; }
 
@@ -121,7 +124,10 @@ class DummyVerifier : public IThresholdVerifier {
   virtual const IShareVerificationKey& getShareVerificationKey(ShareID signer) const override {
     return dummyShareVerificationKey_;
   }
-};
+  virtual const std::string getVersion() const override { return std::string("123"); }
+  virtual void serializeDataMembers(std::ostream&) const override {}
+  virtual void deserializeDataMembers(std::istream&) override {}
+} dummyVerifier_;
 
 void setUpConfiguration_4() {
   for (int i = 0; i < N; i++) {
@@ -133,6 +139,8 @@ void setUpConfiguration_4() {
   replicaConfig[0].replicaPrivateKey = privateKey_0;
 
   pRepInfo = std::make_unique<bftEngine::impl::ReplicasInfo>(replicaConfig[0], true, true);
+
+  replicaConfig[0].singletonFromThis();
 
   sigManager_ = new SigManager(
       0, replicaConfig[0].numReplicas, replicaConfig[0].replicaPrivateKey, replicaConfig[0].publicKeysOfReplicas);
@@ -182,12 +190,10 @@ TEST(testViewchangeSafetyLogic_test, computeRestrictions) {
                                 pfMsg->signatureLen(),
                                 pfMsg->signatureBody());
 
-  auto VCS =
-      ViewChangeSafetyLogic(N, F, C, std::make_shared<DummyVerifier>(), PrePrepareMsg::digestOfNullPrePrepareMsg());
+  auto VCS = ViewChangeSafetyLogic(N, F, C, &dummyVerifier_, PrePrepareMsg::digestOfNullPrePrepareMsg());
 
   SeqNum min{}, max{};
-  std::shared_ptr<IThresholdVerifier> ver{new DummyVerifier()};
-  VCS.computeRestrictions(viewChangeMsgs, VCS.calcLBStableForView(viewChangeMsgs), min, max, restrictions, ver);
+  VCS.computeRestrictions(viewChangeMsgs, VCS.calcLBStableForView(viewChangeMsgs), min, max, restrictions);
 
   for (int i = 0; i < kWorkWindowSize; i++) {
     if (i == assignedSeqNum - min) {
@@ -297,12 +303,10 @@ TEST(testViewchangeSafetyLogic_test, computeRestrictions_two_prepare_certs_for_s
                                 pfMsg2->signatureLen(),
                                 pfMsg2->signatureBody());
 
-  auto VCS =
-      ViewChangeSafetyLogic(N, F, C, std::make_shared<DummyVerifier>(), PrePrepareMsg::digestOfNullPrePrepareMsg());
+  auto VCS = ViewChangeSafetyLogic(N, F, C, &dummyVerifier_, PrePrepareMsg::digestOfNullPrePrepareMsg());
 
   SeqNum min{}, max{};
-  std::shared_ptr<IThresholdVerifier> ver{new DummyVerifier()};
-  VCS.computeRestrictions(viewChangeMsgs, VCS.calcLBStableForView(viewChangeMsgs), min, max, restrictions, ver);
+  VCS.computeRestrictions(viewChangeMsgs, VCS.calcLBStableForView(viewChangeMsgs), min, max, restrictions);
 
   for (int i = 0; i < kWorkWindowSize; i++) {
     if (i == assignedSeqNum - min) {
@@ -423,12 +427,10 @@ TEST(testViewchangeSafetyLogic_test, computeRestrictions_two_prepare_certs_one_i
                                 pfMsg2->signatureLen(),
                                 pfMsg2->signatureBody());
 
-  auto VCS =
-      ViewChangeSafetyLogic(N, F, C, std::make_shared<DummyVerifier>(), PrePrepareMsg::digestOfNullPrePrepareMsg());
+  auto VCS = ViewChangeSafetyLogic(N, F, C, &dummyVerifier_, PrePrepareMsg::digestOfNullPrePrepareMsg());
 
   SeqNum min{}, max{};
-  std::shared_ptr<IThresholdVerifier> ver{new DummyVerifier()};
-  VCS.computeRestrictions(viewChangeMsgs, VCS.calcLBStableForView(viewChangeMsgs), min, max, restrictions, ver);
+  VCS.computeRestrictions(viewChangeMsgs, VCS.calcLBStableForView(viewChangeMsgs), min, max, restrictions);
 
   // Check that the reported lowest meaningful sequence number for the
   // View Change (min) is above the one that is below the last stable
@@ -471,7 +473,8 @@ TEST(testViewchangeSafetyLogic_test, one_different_new_view_in_VC_msgs) {
   viewChangeMsgs[2] = new ViewChangeMsg(2, 10, 0);
   viewChangeMsgs[3] = new ViewChangeMsg(3, 11, 0);
 
-  auto VCS = ViewChangeSafetyLogic(N, F, C, nullptr, PrePrepareMsg::digestOfNullPrePrepareMsg());
+  auto VCS = ViewChangeSafetyLogic(
+      N, F, C, replicaConfig[0].thresholdVerifierForSlowPathCommit, PrePrepareMsg::digestOfNullPrePrepareMsg());
 
   ASSERT_DEATH(VCS.calcLBStableForView(viewChangeMsgs), "");
 
@@ -493,7 +496,8 @@ TEST(testViewchangeSafetyLogic_test, different_new_views_in_VC_msgs) {
     }
   }
 
-  auto VCS = ViewChangeSafetyLogic(N, F, C, nullptr, PrePrepareMsg::digestOfNullPrePrepareMsg());
+  auto VCS = ViewChangeSafetyLogic(
+      N, F, C, replicaConfig[0].thresholdVerifierForSlowPathCommit, PrePrepareMsg::digestOfNullPrePrepareMsg());
 
   ASSERT_DEATH(VCS.calcLBStableForView(viewChangeMsgs), "");
 
@@ -516,7 +520,8 @@ TEST(testViewchangeSafetyLogic_test, empty_correct_VC_msgs) {
     }
   }
 
-  auto VCS = ViewChangeSafetyLogic(N, F, C, nullptr, PrePrepareMsg::digestOfNullPrePrepareMsg());
+  auto VCS = ViewChangeSafetyLogic(
+      N, F, C, replicaConfig[0].thresholdVerifierForSlowPathCommit, PrePrepareMsg::digestOfNullPrePrepareMsg());
 
   auto seqNum = VCS.calcLBStableForView(viewChangeMsgs);
   ConcordAssert(seqNum == lastStableSeqNum);

@@ -17,11 +17,6 @@ class Error(Exception):
 class BadReplyError(Exception):
     """An invalid reply was returned from the client"""
     pass
-
-class ReadTimeoutError(Exception):
-    """A read was expected to succeed but timed out instead"""
-    pass
-
 ##
 ## Exceptions for skvbc_linearizability
 ##
