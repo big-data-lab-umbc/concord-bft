@@ -177,3 +177,7 @@ Run 13 out of 20 replicas and 4 clients, with 2000 transactions per client and t
 ```
 ./simpleTest.py -l DEBUG -i 2000 -nc -bft n=20,r=13,f=5,c=2,cl=4,testViewChange
 ```
+
+### Note
+cd build/tests/simpleTest/scripts
+./simpleTest.py -l DEBUG -i 5000 -nc -bft n=6,r=6,f=1,c=1,cl=2,testViewChange -p
