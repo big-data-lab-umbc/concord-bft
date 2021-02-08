@@ -1,0 +1,64 @@
+2021-02-08 02:08:40,897 INFO   Start config "n=6_r=6_f=1_c=1_cl=2_testViewChange"
+2021-02-08 02:08:40,897 DEBUG  Run command: ['/concord-bft/build/tests/simpleTest/server', '-id', '0', '-r', '6', '-c', '2', '-vc', '-vct', '60000']
+2021-02-08 02:08:40,897 DEBUG  Run command: ['/concord-bft/build/tests/simpleTest/server', '-id', '1', '-r', '6', '-c', '2', '-vc', '-vct', '60000']
+2021-02-08 02:08:40,898 DEBUG  Run command: ['/concord-bft/build/tests/simpleTest/server', '-id', '2', '-r', '6', '-c', '2', '-vc', '-vct', '60000']
+2021-02-08 02:08:40,898 DEBUG  Run command: ['/concord-bft/build/tests/simpleTest/server', '-id', '3', '-r', '6', '-c', '2', '-vc', '-vct', '60000']
+2021-02-08 02:08:40,898 DEBUG  Run command: ['/concord-bft/build/tests/simpleTest/server', '-id', '4', '-r', '6', '-c', '2', '-vc', '-vct', '60000']
+2021-02-08 02:08:40,898 DEBUG  Run command: ['/concord-bft/build/tests/simpleTest/server', '-id', '5', '-r', '6', '-c', '2', '-vc', '-vct', '60000']
+2021-02-08 02:08:40,899 DEBUG  Run command: ['/concord-bft/build/tests/simpleTest/client', '-i', '5000', '-r', '6', '-cl', '2', '-id', '6', '-f', '1', '-c', '1', '-irt', '1100', '-minrt', '1000', '-maxrt', '2000', '-srft', '2', '-srpt', '2', '-prt', '30', '-p']
+2021-02-08 02:08:40,900 DEBUG  Run command: ['/concord-bft/build/tests/simpleTest/client', '-i', '5000', '-r', '6', '-cl', '2', '-id', '7', '-f', '1', '-c', '1', '-irt', '1100', '-minrt', '1000', '-maxrt', '2000', '-srft', '2', '-srpt', '2', '-prt', '30', '-p']
+2021-02-08 02:08:40,901 DEBUG  processes started
+2021-02-08 02:09:10,052 DEBUG  processes stopped
+2021-02-08 02:09:10,053 INFO   End config "n=6_r=6_f=1_c=1_cl=2_testViewChange"
+2021-02-08 02:09:10,102 DEBUG  output: client ['-i', '5000', '-r', '6', '-cl', '2', '-id', '6', '-f', '1', '-c', '1', '-irt', '1100', '-minrt', '1000', '-maxrt', '2000', '-srft', '2', '-srpt', '2', '-prt', '30', '-p'] is done with exit code 0 and message '|02-08-2021 02:09:07.083|INFO |simpletest.client||||simple_test_client.hpp:231|bool SimpleTestClient::run()|test done, iterations: 5000'
+client ['-i', '5000', '-r', '6', '-cl', '2', '-id', '7', '-f', '1', '-c', '1', '-irt', '1100', '-minrt', '1000', '-maxrt', '2000', '-srft', '2', '-srpt', '2', '-prt', '30', '-p'] is done with exit code 0 and message '|02-08-2021 02:09:07.089|INFO |simpletest.client||||simple_test_client.hpp:231|bool SimpleTestClient::run()|test done, iterations: 5000'
+server ['-id', '0', '-r', '6', '-c', '2', '-vc', '-vct', '60000'] is done with exit code 0 and message '|02-08-2021 02:09:07.149|INFO |simpletest.replica||||simple_test_replica.hpp:208|void SimpleTestReplica::stop()|replica 0 stopped'
+server ['-id', '1', '-r', '6', '-c', '2', '-vc', '-vct', '60000'] is done with exit code 0 and message '|02-08-2021 02:09:07.712|INFO |simpletest.replica||||simple_test_replica.hpp:208|void SimpleTestReplica::stop()|replica 1 stopped'
+server ['-id', '2', '-r', '6', '-c', '2', '-vc', '-vct', '60000'] is done with exit code 0 and message '|02-08-2021 02:09:08.193|INFO |simpletest.replica||||simple_test_replica.hpp:208|void SimpleTestReplica::stop()|replica 2 stopped'
+server ['-id', '3', '-r', '6', '-c', '2', '-vc', '-vct', '60000'] is done with exit code 0 and message '|02-08-2021 02:09:08.676|INFO |simpletest.replica||||simple_test_replica.hpp:208|void SimpleTestReplica::stop()|replica 3 stopped'
+server ['-id', '4', '-r', '6', '-c', '2', '-vc', '-vct', '60000'] is done with exit code 0 and message '|02-08-2021 02:09:09.138|INFO |simpletest.replica||||simple_test_replica.hpp:208|void SimpleTestReplica::stop()|replica 4 stopped'
+server ['-id', '5', '-r', '6', '-c', '2', '-vc', '-vct', '60000'] is done with exit code 0 and message '|02-08-2021 02:09:09.600|INFO |simpletest.replica||||simple_test_replica.hpp:208|void SimpleTestReplica::stop()|replica 5 stopped'
+, 0
+2021-02-08 02:09:10,102 INFO   CONFIGURATION RUN SUCCESS
+2021-02-08 02:09:10,102 INFO   Performance summary:
+Average duration(sec): 26.17, Average throughput(ops/sec): 191.04
+Count: 10000  Average: 5216.5087  StdDev: 4150.88
+Min: 91.0000  Median: 5661.0531  Max: 205404.0000
+------------------------------------------------------
+[      90,     100 )      25   0.250%   0.250% 
+[     100,     120 )     315   3.150%   3.400% #
+[     120,     140 )     264   2.640%   6.040% #
+[     140,     160 )     132   1.320%   7.360% 
+[     160,     180 )      44   0.440%   7.800% 
+[     180,     200 )      43   0.430%   8.230% 
+[     200,     250 )     118   1.180%   9.410% 
+[     250,     300 )     172   1.720%  11.130% 
+[     300,     350 )     175   1.750%  12.880% 
+[     350,     400 )      91   0.910%  13.790% 
+[     400,     450 )      27   0.270%  14.060% 
+[     450,     500 )      11   0.110%  14.170% 
+[     500,     600 )       6   0.060%  14.230% 
+[     600,     700 )       1   0.010%  14.240% 
+[     700,     800 )       1   0.010%  14.250% 
+[     800,     900 )       1   0.010%  14.260% 
+[    1200,    1400 )       1   0.010%  14.270% 
+[    2500,    3000 )       2   0.020%  14.290% 
+[    3000,    3500 )       2   0.020%  14.310% 
+[    3500,    4000 )       4   0.040%  14.350% 
+[    4000,    4500 )      23   0.230%  14.580% 
+[    4500,    5000 )     441   4.410%  18.990% #
+[    5000,    6000 )    4691  46.910%  65.900% #########
+[    6000,    7000 )    2798  27.980%  93.880% ######
+[    7000,    8000 )     444   4.440%  98.320% #
+[    8000,    9000 )      81   0.810%  99.130% 
+[    9000,   10000 )      26   0.260%  99.390% 
+[   10000,   12000 )      19   0.190%  99.580% 
+[   12000,   14000 )      17   0.170%  99.750% 
+[   14000,   16000 )       4   0.040%  99.790% 
+[   16000,   18000 )       6   0.060%  99.850% 
+[   18000,   20000 )       6   0.060%  99.910% 
+[   20000,   25000 )       5   0.050%  99.960% 
+[  140000,  160000 )       2   0.020%  99.980% 
+[  200000,  250000 )       2   0.020% 100.000% 
+
+2021-02-08 02:09:10,102 INFO   TEST SUCCESS
