@@ -1,0 +1,1 @@
+cli args: ['./simpleTest.py', '-l', 'DEBUG', '-i', '10000', '-nc', '-bft', 'n=6,r=6,f=1,c=1,cl=3,testViewChange', '-p']
